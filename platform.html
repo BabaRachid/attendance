@@ -3021,17 +3021,19 @@ const Absence = (() => {
     return sdkPromise;
   }
 
-  /** استخراج كائن الإعدادات حتى لو لُصق الكود كاملًا من موقع Firebase */
+  /** استخراج إعدادات Firebase من أي نص ملصق (حتى مع أسطر import وغيرها) */
   function parseConfig(text) {
-    const m = text.match(/\{[\s\S]*\}/);
-    if (!m) throw new Error("لم يُعثر على كائن الإعدادات");
-    // تحويل مفاتيح JS إلى JSON صالح
-    const jsonish = m[0]
-      .replace(/([,{]\s*)([A-Za-z0-9_]+)\s*:/g, '$1"$2":')
-      .replace(/'/g, '"')
-      .replace(/,\s*}/g, "}");
-    const cfg = JSON.parse(jsonish);
-    if (!cfg.databaseURL) throw new Error("الإعدادات لا تحتوي على databaseURL — فعّل Realtime Database أولًا");
+    // نلتقط كل أزواج  key: "value"  الموجودة في النص
+    const KNOWN = ["apiKey","authDomain","databaseURL","projectId",
+                   "storageBucket","messagingSenderId","appId","measurementId"];
+    const cfg = {};
+    for (const m of text.matchAll(/([A-Za-z][A-Za-z0-9_]*)\s*:\s*["']([^"']+)["']/g)) {
+      if (KNOWN.includes(m[1])) cfg[m[1]] = m[2];
+    }
+    if (!cfg.apiKey || !cfg.projectId)
+      throw new Error("لم يُعثر على إعدادات Firebase في النص الملصق — الصق كائن firebaseConfig كما هو");
+    if (!cfg.databaseURL)
+      throw new Error("الإعدادات لا تحتوي على databaseURL — أنشئ Realtime Database أولًا ثم انسخ الإعدادات من جديد");
     return cfg;
   }
 
