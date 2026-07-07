@@ -1,0 +1,410 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>تسجيل الغياب — مركز الدعم المدرسي</title>
+<link href="https://fonts.googleapis.com/css2?family=Cairo:wght@700;800&family=IBM+Plex+Sans+Arabic:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+/* =====================================================
+   تطبيق الأساتذة (هاتف أولًا) — تسجيل الغياب والانقطاع
+   ===================================================== */
+:root{
+  --ink:#16202E; --slate:#1B2A41; --teal:#0E7C7B; --teal-dark:#0A5B5A;
+  --amber:#E8A13D; --sand:#FBF7EF; --line:#DDE3EA; --muted:#6B7686;
+  --danger:#C4463C; --ok:#2E8B57;
+}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{
+  margin:0;font-family:"IBM Plex Sans Arabic",system-ui,sans-serif;color:var(--ink);
+  background:
+    radial-gradient(600px 300px at 90% -5%, rgba(14,124,123,.16), transparent 60%),
+    linear-gradient(165deg,#EDF2F6,#EFF3F1);
+  min-height:100vh;font-size:15px;
+}
+.wrap{max-width:520px;margin:0 auto;padding:16px 14px 90px}
+header{
+  background:linear-gradient(135deg,var(--slate),#22334E);color:#fff;
+  border-radius:16px;padding:16px 18px;margin-bottom:16px;
+  box-shadow:0 8px 24px rgba(22,32,46,.25);
+}
+header h1{font-family:Cairo;font-size:19px;margin:0}
+header p{margin:4px 0 0;font-size:12.5px;color:#AFC0D4}
+h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
+.card{background:#fff;border:1px solid var(--line);border-radius:16px;padding:16px;margin-bottom:14px;box-shadow:0 6px 20px rgba(22,32,46,.07)}
+.hint{color:var(--muted);font-size:12.5px;line-height:1.7}
+.btn{
+  display:flex;align-items:center;justify-content:center;gap:8px;width:100%;
+  font:inherit;font-weight:700;font-size:15.5px;border:none;border-radius:13px;
+  padding:14px;cursor:pointer;margin-top:10px;
+}
+.btn-primary{background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#fff;box-shadow:0 6px 16px rgba(14,124,123,.35)}
+.btn-ghost{background:#fff;border:1.5px solid var(--line)}
+.btn-wa{background:#25D366;color:#fff;box-shadow:0 6px 16px rgba(37,211,102,.35)}
+.input{font:inherit;padding:12px;border:1.5px solid var(--line);border-radius:12px;width:100%}
+.input:focus{outline:none;border-color:var(--teal)}
+
+/* اختيار الأستاذ */
+.teacher-btn{
+  display:flex;align-items:center;gap:12px;width:100%;text-align:right;
+  background:#fff;border:1.5px solid var(--line);border-radius:14px;
+  padding:14px;margin-bottom:10px;font:inherit;cursor:pointer;
+}
+.teacher-btn:active{border-color:var(--teal);background:#F0F8F7}
+.teacher-btn .avatar{
+  width:44px;height:44px;border-radius:12px;flex-shrink:0;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#fff;
+  font-family:Cairo;font-size:18px;font-weight:800;
+}
+.teacher-btn b{display:block;font-size:15px}
+.teacher-btn small{color:var(--muted)}
+
+/* لائحة التلاميذ */
+.stu{
+  border:1.5px solid var(--line);border-radius:14px;padding:12px;margin-bottom:10px;
+  transition:border-color .12s, background .12s;
+}
+.stu.absent{border-color:var(--danger);background:#FDF3F2}
+.stu.dropped{border-color:var(--amber);background:#FCF6EA;opacity:.9}
+.stu-top{display:flex;align-items:center;gap:10px}
+.stu-top b{flex:1;font-size:15px}
+.stu-top small{display:block;color:var(--muted);font-weight:400;font-size:12px}
+.chk-absent{
+  display:flex;align-items:center;gap:8px;font-weight:700;color:var(--danger);
+  font-size:13.5px;user-select:none;cursor:pointer;white-space:nowrap;
+}
+.chk-absent input{width:22px;height:22px;accent-color:var(--danger)}
+.stu-foot{margin-top:8px;display:flex;justify-content:space-between;align-items:center}
+.drop-toggle{
+  font:inherit;font-size:12px;font-weight:700;border-radius:999px;cursor:pointer;
+  border:1.5px solid var(--amber);color:#B87514;background:#fff;padding:5px 12px;
+}
+.drop-toggle.on{background:var(--amber);color:#fff}
+.badge-dropped{font-size:11.5px;color:#B87514;font-weight:800}
+
+.counter{
+  position:fixed;bottom:0;right:0;left:0;background:#fff;border-top:1px solid var(--line);
+  padding:10px 16px;display:flex;align-items:center;gap:12px;z-index:10;
+  box-shadow:0 -6px 20px rgba(22,32,46,.08);
+}
+.counter .nums{flex:1;font-size:13px;color:var(--muted)}
+.counter .nums b{color:var(--danger)}
+.counter button{width:auto;margin:0;padding:12px 22px}
+
+/* شاشة الرمز */
+.code-box{
+  background:var(--sand);border:1.5px dashed var(--amber);border-radius:12px;
+  padding:12px;font-size:11px;word-break:break-all;direction:ltr;text-align:left;
+  max-height:140px;overflow:auto;font-family:monospace;
+}
+.ok-big{text-align:center;font-size:46px;margin:6px 0}
+.err{background:#FBE7E5;color:var(--danger);border-radius:12px;padding:12px;font-weight:600}
+.back{background:none;border:none;color:var(--teal-dark);font:inherit;font-weight:700;cursor:pointer;padding:0;margin-bottom:10px}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <h1 id="centerName">مركز الدعم المدرسي</h1>
+    <p>تطبيق الأساتذة — تسجيل الغياب والانقطاع</p>
+  </header>
+
+  <!-- شاشة 0: خطأ تحميل البيانات -->
+  <div class="card" id="scrError" hidden>
+    <div class="err" id="errMsg">تعذر تحميل البيانات.</div>
+    <p class="hint">اطلب من إدارة المركز رابطًا محدثًا، أو تأكد من وجود ملف data.json بجانب هذه الصفحة.</p>
+  </div>
+
+  <!-- شاشة 1: اختيار الأستاذ -->
+  <div id="scrTeachers" hidden>
+    <div class="card">
+      <h2>من أنت؟</h2>
+      <p class="hint">اختر اسمك للدخول إلى قائمة تلاميذك.</p>
+    </div>
+    <div id="teachersList"></div>
+    <p class="hint" style="text-align:center" id="genInfo"></p>
+  </div>
+
+  <!-- شاشة 2: تسجيل الغياب -->
+  <div id="scrMark" hidden>
+    <button class="back" id="btnBack">→ رجوع لاختيار الأستاذ</button>
+    <div class="card">
+      <h2 id="markTitle"></h2>
+      <label style="font-size:13px;font-weight:600">تاريخ الحصة
+        <input type="date" class="input" id="sessionDate" style="margin-top:6px">
+      </label>
+      <p class="hint" style="margin-bottom:0">علّم ✅ على <b>الغائبين فقط</b>. زر "منقطع" للتلميذ الذي توقف نهائيًا عن الحضور.</p>
+    </div>
+    <div id="studentsList"></div>
+  </div>
+
+  <!-- شريط الإرسال -->
+  <div class="counter" id="counterBar" hidden>
+    <div class="nums" id="counterNums"></div>
+    <button class="btn btn-primary" id="btnSend">📤 إرسال</button>
+  </div>
+
+  <!-- شاشة 3: النتيجة -->
+  <div id="scrCode" hidden>
+    <div class="card" style="text-align:center">
+      <div class="ok-big" id="okIcon">✅</div>
+      <h2 id="okTitle">تم تسجيل الغياب</h2>
+      <p class="hint" id="codeSummary"></p>
+    </div>
+    <div class="card" id="liveOkCard" hidden style="text-align:center">
+      <p style="font-weight:700;color:var(--ok);margin:0">📡 وصل الغياب إلى المنصة مباشرة — لا حاجة لأي خطوة أخرى.</p>
+      <button class="btn btn-ghost" id="btnAgainLive">تسجيل حصة أخرى</button>
+    </div>
+    <div id="codeCard">
+    <div class="card">
+      <p class="hint" style="margin-top:0">أرسل هذا الرمز إلى إدارة المركز (واتساب أو نسخ) لتُسجَّل الغيابات في المنصة:</p>
+      <div class="code-box" id="codeBox"></div>
+      <button class="btn btn-wa" id="btnWhatsApp">📱 إرسال عبر واتساب</button>
+      <button class="btn btn-ghost" id="btnCopy">📋 نسخ الرمز</button>
+      <button class="btn btn-ghost" id="btnAgain">تسجيل حصة أخرى</button>
+    </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+"use strict";
+/* =====================================================
+   تحميل البيانات:
+   1) من الرابط نفسه (#D1.xxxx) إن وُجد.
+   2) وإلا من ملف data.json المجاور (GitHub Pages).
+   ===================================================== */
+const $ = id => document.getElementById(id);
+const b64dec = s => decodeURIComponent(escape(atob(s)));
+const b64enc = s => btoa(unescape(encodeURIComponent(s)));
+
+let DATA = null;          // { center, gen, teachers:[{id,name,subject,students:[]}] }
+let fdb = null;           // قاعدة Firebase عند الربط المباشر (#F1)
+let teacher = null;       // الأستاذ المختار
+let absent = new Set();   // الغائبون في هذه الحصة
+let dropped = new Set();  // المعلَّمون كمنقطعين الآن
+let returned = new Set(); // من أُلغي انقطاعهم الآن
+
+function todayStr(){
+  const d = new Date();
+  return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");
+}
+
+function loadScript(src){
+  return new Promise((ok,bad)=>{
+    const s=document.createElement("script");
+    s.src=src; s.onload=ok; s.onerror=()=>bad(new Error("فشل التحميل"));
+    document.head.appendChild(s);
+  });
+}
+
+/* الربط المباشر: الرابط يحمل إعدادات Firebase فقط (#F1)
+   → البيانات تُقرأ لحظيًا وتتحدث وحدها عند أي تغيير في المنصة */
+async function connectFirebase(cfg){
+  await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js");
+  await loadScript("https://www.gstatic.com/firebasejs/10.12.2/firebase-database-compat.js");
+  firebase.initializeApp(cfg);
+  fdb = firebase.database();
+  return new Promise((resolve) => {
+    fdb.ref("data").on("value", snap => {
+      const v = snap.val();
+      if (v && Array.isArray(v.teachers)) {
+        // Firebase يحذف المصفوفات الفارغة — نعيدها
+        v.teachers.forEach(t => t.students = t.students || []);
+        const first = !DATA;
+        DATA = v;
+        $("centerName").textContent = DATA.center || "مركز الدعم المدرسي";
+        $("genInfo").textContent = "🟢 متصل مباشرة — البيانات تتحدث تلقائيًا";
+        if (first) resolve(DATA);
+        else if (!$("scrTeachers").hidden) showTeachers();  // تحديث حي للائحة
+      } else if (!DATA) resolve(null);
+    }, () => resolve(null));
+  });
+}
+
+async function loadData(){
+  const h = location.hash;
+  // 1) ربط مباشر
+  if (h.startsWith("#F1.")) {
+    try {
+      const { fb } = JSON.parse(b64dec(h.slice(4)));
+      return await connectFirebase(fb);
+    } catch(e){ console.error(e); }
+  }
+  // 2) بيانات داخل الرابط
+  if (h.startsWith("#D1.")) {
+    try { return JSON.parse(b64dec(h.slice(4))); }
+    catch(e){ console.error(e); }
+  }
+  // 3) من data.json
+  try {
+    const res = await fetch("data.json?nocache=" + Date.now());
+    if (res.ok) return await res.json();
+  } catch(e){ console.error(e); }
+  return null;
+}
+
+function showTeachers(){
+  $("scrMark").hidden = true; $("scrCode").hidden = true; $("counterBar").hidden = true;
+  $("scrTeachers").hidden = false;
+  $("teachersList").innerHTML = DATA.teachers.map(t => `
+    <button class="teacher-btn" data-id="${t.id}">
+      <span class="avatar">${(t.name||"?").trim()[0]}</span>
+      <span><b>ذ. ${t.name}</b><small>${t.subject} — ${t.students.length} تلميذ(ة)</small></span>
+    </button>`).join("") || '<div class="card hint">لا يوجد أساتذة في البيانات.</div>';
+  document.querySelectorAll(".teacher-btn").forEach(b =>
+    b.onclick = () => openMark(b.dataset.id));
+}
+
+function openMark(id){
+  teacher = DATA.teachers.find(t => t.id === id);
+  if (!teacher) return;
+  absent.clear(); dropped.clear(); returned.clear();
+  teacher.students.forEach(s => { if (s.dropped) dropped.add(s.id); });
+
+  $("scrTeachers").hidden = true; $("scrCode").hidden = true;
+  $("scrMark").hidden = false; $("counterBar").hidden = false;
+  $("markTitle").textContent = `ذ. ${teacher.name} — ${teacher.subject}`;
+  $("sessionDate").value = todayStr();
+  renderStudents();
+}
+
+function renderStudents(){
+  $("studentsList").innerHTML = teacher.students.map(s => {
+    const isDropped = dropped.has(s.id);
+    const isAbsent = absent.has(s.id);
+    return `
+    <div class="stu ${isAbsent ? "absent" : ""} ${isDropped ? "dropped" : ""}" id="stu-${s.id}">
+      <div class="stu-top">
+        <b>${s.name}<small>${s.id}${s.level ? " — " + s.level : ""}</small></b>
+        <label class="chk-absent">
+          <input type="checkbox" ${isAbsent ? "checked" : ""} ${isDropped ? "disabled" : ""}
+                 onchange="toggleAbsent('${s.id}', this.checked)">
+          غائب
+        </label>
+      </div>
+      <div class="stu-foot">
+        ${isDropped ? '<span class="badge-dropped">⛔ منقطع عن الدراسة</span>' : '<span></span>'}
+        <button class="drop-toggle ${isDropped ? "on" : ""}" onclick="toggleDrop('${s.id}')">
+          ${isDropped ? "✔ إلغاء الانقطاع" : "⛔ منقطع"}
+        </button>
+      </div>
+    </div>`;
+  }).join("") || '<div class="card hint">لا يوجد تلاميذ مسندون إليك بعد.</div>';
+  updateCounter();
+}
+
+window.toggleAbsent = (id, on) => {
+  on ? absent.add(id) : absent.delete(id);
+  $("stu-" + id).classList.toggle("absent", on);
+  updateCounter();
+};
+
+window.toggleDrop = (id) => {
+  const s = teacher.students.find(x => x.id === id);
+  const wasOriginallyDropped = !!s.dropped;
+  if (dropped.has(id)) {
+    dropped.delete(id);
+    if (wasOriginallyDropped) returned.add(id);   // كان منقطعًا في البيانات وألغيناه
+  } else {
+    dropped.add(id);
+    returned.delete(id);
+    absent.delete(id);   // المنقطع لا يُحسب غائبًا
+  }
+  renderStudents();
+};
+
+function updateCounter(){
+  $("counterNums").innerHTML =
+    `الغائبون: <b>${absent.size}</b> — المنقطعون: ${dropped.size} — الحاضرون: ${teacher.students.length - absent.size - dropped.size}`;
+}
+
+/* بناء رمز الغياب وإرساله */
+function buildCode(){
+  const newlyDropped = [...dropped].filter(id => !teacher.students.find(s => s.id === id)?.dropped);
+  const payload = {
+    t: teacher.id,
+    s: teacher.subject,
+    d: $("sessionDate").value || todayStr(),
+    a: [...absent],
+    x: newlyDropped,
+    r: [...returned]
+  };
+  return "GH1." + b64enc(JSON.stringify(payload));
+}
+
+function buildPayload(){
+  const newlyDropped = [...dropped].filter(id => !teacher.students.find(s => s.id === id)?.dropped);
+  return {
+    t: teacher.id, s: teacher.subject,
+    d: $("sessionDate").value || todayStr(),
+    a: [...absent], x: newlyDropped, r: [...returned],
+    ts: Date.now()
+  };
+}
+
+$("btnSend").onclick = async () => {
+  if (!$("sessionDate").value) { alert("حدد تاريخ الحصة"); return; }
+
+  // ---- الإرسال المباشر ----
+  if (fdb) {
+    $("btnSend").disabled = true; $("btnSend").textContent = "⏳ جارٍ الإرسال…";
+    try {
+      await fdb.ref("absences").push(buildPayload());
+      $("scrMark").hidden = true; $("counterBar").hidden = true;
+      $("scrCode").hidden = false;
+      $("liveOkCard").hidden = false; $("codeCard").hidden = true;
+      $("codeSummary").textContent =
+        `ذ. ${teacher.name} — ${teacher.subject} — ${$("sessionDate").value} — ${absent.size} غائب(ة)` +
+        (dropped.size ? ` — ${dropped.size} منقطع(ة)` : "");
+      return;
+    } catch(e) {
+      console.error(e);
+      alert("تعذر الإرسال المباشر — سيُعرض رمز احتياطي لإرساله عبر واتساب.");
+    } finally {
+      $("btnSend").disabled = false; $("btnSend").textContent = "📤 إرسال";
+    }
+  }
+
+  // ---- خطة الرمز الاحتياطية ----
+  const code = buildCode();
+  $("scrMark").hidden = true; $("counterBar").hidden = true;
+  $("scrCode").hidden = false;
+  $("liveOkCard").hidden = true; $("codeCard").hidden = false;
+  $("codeBox").textContent = code;
+  $("codeSummary").textContent =
+    `ذ. ${teacher.name} — ${teacher.subject} — ${$("sessionDate").value} — ` +
+    `${absent.size} غائب(ة)` + (dropped.size ? ` — ${dropped.size} منقطع(ة)` : "");
+  const msg = `رمز الغياب — ${teacher.name} (${teacher.subject}) يوم ${$("sessionDate").value}:\n${code}`;
+  $("btnWhatsApp").onclick = () => window.open("https://wa.me/?text=" + encodeURIComponent(msg), "_blank");
+  $("btnCopy").onclick = async () => {
+    try { await navigator.clipboard.writeText(code); $("btnCopy").textContent = "✔ تم النسخ"; }
+    catch { prompt("انسخ الرمز يدويًا:", code); }
+  };
+};
+
+$("btnAgain").onclick = () => openMark(teacher.id);
+$("btnAgainLive").onclick = () => {
+  // إعادة قراءة بيانات الأستاذ المحدثة (قد يكون أضيف/أزيل تلميذ)
+  const t = DATA.teachers.find(x => x.id === teacher.id);
+  t ? openMark(t.id) : showTeachers();
+};
+$("btnBack").onclick = showTeachers;
+
+/* الانطلاق */
+(async () => {
+  DATA = await loadData();
+  if (!DATA || !Array.isArray(DATA.teachers)) {
+    $("scrError").hidden = false;
+    return;
+  }
+  $("centerName").textContent = DATA.center || "مركز الدعم المدرسي";
+  $("genInfo").textContent = "آخر تحديث للبيانات: " + (DATA.gen || "—");
+  showTeachers();
+})();
+</script>
+</body>
+</html>
