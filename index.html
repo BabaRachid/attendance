@@ -108,7 +108,7 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
 
   <header>
     <h1 id="centerName">مركز الدعم المدرسي</h1>
-    <p>تطبيق الأساتذة — تسجيل الغياب والانقطاع</p>
+    <p>تطبيق الأساتذة — تسجيل الغياب والانقطاع <span style="opacity:.65">· الإصدار 2 مباشر</span></p>
   </header>
 
   <!-- شاشة 0: خطأ تحميل البيانات -->
@@ -183,6 +183,7 @@ const b64enc = s => btoa(unescape(encodeURIComponent(s)));
 
 let DATA = null;          // { center, gen, teachers:[{id,name,subject,students:[]}] }
 let fdb = null;           // قاعدة Firebase عند الربط المباشر (#F1)
+let LEGACY = false;       // true = رابط قديم (#D1 أو data.json) غير مباشر
 let teacher = null;       // الأستاذ المختار
 let absent = new Set();   // الغائبون في هذه الحصة
 let dropped = new Set();  // المعلَّمون كمنقطعين الآن
@@ -234,15 +235,15 @@ async function loadData(){
       return await connectFirebase(fb);
     } catch(e){ console.error(e); }
   }
-  // 2) بيانات داخل الرابط
+  // 2) بيانات داخل الرابط (وضع قديم غير مباشر)
   if (h.startsWith("#D1.")) {
-    try { return JSON.parse(b64dec(h.slice(4))); }
+    try { LEGACY = true; return JSON.parse(b64dec(h.slice(4))); }
     catch(e){ console.error(e); }
   }
-  // 3) من data.json
+  // 3) من data.json (وضع قديم غير مباشر)
   try {
     const res = await fetch("data.json?nocache=" + Date.now());
-    if (res.ok) return await res.json();
+    if (res.ok) { LEGACY = true; return await res.json(); }
   } catch(e){ console.error(e); }
   return null;
 }
@@ -402,7 +403,12 @@ $("btnBack").onclick = showTeachers;
     return;
   }
   $("centerName").textContent = DATA.center || "مركز الدعم المدرسي";
-  $("genInfo").textContent = "آخر تحديث للبيانات: " + (DATA.gen || "—");
+  if (LEGACY) {
+    $("genInfo").innerHTML =
+      '<span style="display:inline-block;background:#FCF6EA;border:1.5px solid var(--amber);color:#B87514;' +
+      'border-radius:10px;padding:8px 14px;font-weight:700">⚠ هذا رابط قديم (غير مباشر) — اطلب من الإدارة الرابط الجديد</span>' +
+      '<br>آخر تحديث للبيانات: ' + (DATA.gen || "—");
+  }
   showTeachers();
 })();
 </script>
