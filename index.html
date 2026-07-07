@@ -181,6 +181,18 @@ const $ = id => document.getElementById(id);
 const b64dec = s => decodeURIComponent(escape(atob(s)));
 const b64enc = s => btoa(unescape(encodeURIComponent(s)));
 
+/* إعدادات Firebase مدمجة: عند ملئها يعمل الرابط القصير مباشرة
+   دون الحاجة إلى #F1 في الرابط */
+const EMBEDDED_CONFIG = {
+  apiKey: "AIzaSyBAKsaz0w5XtPzqJEnnyBTsMWwlmsx1jKI",
+  authDomain: "analytics-6656f.firebaseapp.com",
+  databaseURL: "https://analytics-6656f-default-rtdb.firebaseio.com",
+  projectId: "analytics-6656f",
+  storageBucket: "analytics-6656f.firebasestorage.app",
+  messagingSenderId: "225921376490",
+  appId: "1:225921376490:web:1568c898985d064736f793"
+};
+
 let DATA = null;          // { center, gen, teachers:[{id,name,subject,students:[]}] }
 let fdb = null;           // قاعدة Firebase عند الربط المباشر (#F1)
 let LEGACY = false;       // true = رابط قديم (#D1 أو data.json) غير مباشر
@@ -228,12 +240,17 @@ async function connectFirebase(cfg){
 
 async function loadData(){
   const h = location.hash;
-  // 1) ربط مباشر
+  // 1) ربط مباشر عبر الرابط
   if (h.startsWith("#F1.")) {
     try {
       const { fb } = JSON.parse(b64dec(h.slice(4)));
       return await connectFirebase(fb);
     } catch(e){ console.error(e); }
+  }
+  // 2) ربط مباشر عبر الإعدادات المدمجة (الرابط القصير)
+  if (EMBEDDED_CONFIG && EMBEDDED_CONFIG.databaseURL) {
+    try { return await connectFirebase(EMBEDDED_CONFIG); }
+    catch(e){ console.error(e); }
   }
   // 2) بيانات داخل الرابط (وضع قديم غير مباشر)
   if (h.startsWith("#D1.")) {
