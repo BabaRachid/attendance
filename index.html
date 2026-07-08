@@ -101,6 +101,17 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
 .ok-big{text-align:center;font-size:46px;margin:6px 0}
 .err{background:#FBE7E5;color:var(--danger);border-radius:12px;padding:12px;font-weight:600}
 .back{background:none;border:none;color:var(--teal-dark);font:inherit;font-weight:700;cursor:pointer;padding:0;margin-bottom:10px}
+.level-head{
+  display:flex;justify-content:space-between;align-items:center;
+  font-family:Cairo;font-weight:800;font-size:14.5px;color:var(--teal-dark);
+  background:linear-gradient(90deg,#E7F1F1,transparent);
+  border-inline-start:4px solid var(--teal);border-radius:8px;
+  padding:8px 12px;margin:14px 0 8px;
+}
+.level-head span{
+  background:#fff;border:1px solid var(--line);border-radius:999px;
+  padding:1px 10px;font-family:inherit;font-size:12px;color:var(--muted);
+}
 </style>
 </head>
 <body>
@@ -291,7 +302,15 @@ function openMark(id){
 }
 
 function renderStudents(){
-  $("studentsList").innerHTML = teacher.students.map(s => {
+  // تجميع التلاميذ حسب المستوى — كل قسم لوحده
+  const groups = {};
+  teacher.students.forEach(s => {
+    const key = s.level || "بدون مستوى";
+    (groups[key] = groups[key] || []).push(s);
+  });
+  $("studentsList").innerHTML = Object.keys(groups).sort().map(level =>
+    `<div class="level-head">📚 ${level} <span>${groups[level].length}</span></div>` +
+    groups[level].map(s => {
     const isDropped = dropped.has(s.id);
     const isAbsent = absent.has(s.id);
     return `
@@ -311,7 +330,8 @@ function renderStudents(){
         </button>
       </div>
     </div>`;
-  }).join("") || '<div class="card hint">لا يوجد تلاميذ مسندون إليك بعد.</div>';
+    }).join("")
+  ).join("") || '<div class="card hint">لا يوجد تلاميذ مسندون إليك بعد.</div>';
   updateCounter();
 }
 

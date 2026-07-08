@@ -472,6 +472,19 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
 .import-result{margin-top:12px;border:1px solid var(--line);border-radius:10px;padding:10px 12px;background:var(--sand);font-size:13px}
 .import-line{padding:3px 0}
 
+
+/* صفوف تجميع التلاميذ حسب المستوى */
+.level-row td{
+  background:linear-gradient(90deg,#E7F1F1,#F3FAF9)!important;
+  font-family:var(--font-disp);font-weight:800;color:var(--teal-dark);
+  border-top:2px solid var(--teal);font-size:13.5px;
+}
+.level-count{
+  font-family:var(--font-body);font-weight:600;font-size:11.5px;
+  background:#fff;border:1px solid var(--line);border-radius:999px;
+  padding:2px 10px;margin-inline-start:8px;color:var(--muted);
+}
+
 </style>
 </head>
 <body>
@@ -2875,18 +2888,28 @@ const Teachers = (() => {
     $("teacherStudentsTitle").textContent = `تلاميذ الأستاذ ${t.name} — ${t.subject} (${list.length})`;
     $("teacherStudentsEmpty").hidden = list.length > 0;
 
-    $("teacherStudentsTable").querySelector("tbody").innerHTML = list.map(s => `
+    // تجميع التلاميذ حسب المستوى (كل قسم لوحده)
+    const groups = {};
+    list.forEach(s => {
+      const key = (s.level || "بدون مستوى") + (s.branch ? " — " + s.branch : "");
+      (groups[key] = groups[key] || []).push(s);
+    });
+
+    $("teacherStudentsTable").querySelector("tbody").innerHTML =
+      Object.keys(groups).sort().map(level => `
+      <tr class="level-row"><td colspan="5">📚 ${esc(level)} <span class="level-count">${groups[level].length} تلميذ(ة)</span></td></tr>
+      ${groups[level].map(s => `
       <tr>
         <td>${esc(s.id)}</td>
         <td><a href="#" onclick="Students.view('${s.id}');return false"
                style="color:var(--teal-dark);font-weight:600">${esc(s.name)}</a></td>
-        <td>${esc(s.level || "—")}${s.branch ? " — " + esc(s.branch) : ""}</td>
+        <td>${esc(s.class || "—")}</td>
         <td dir="ltr">${esc(s.fatherPhone || "—")}</td>
         <td>
           <button class="btn btn-sm btn-ghost" style="color:var(--danger)"
                   onclick="Teachers.unassign('${s.id}')">✕ إلغاء الإسناد</button>
         </td>
-      </tr>`).join("");
+      </tr>`).join("")}`).join("");
   }
 
   function unassign(studentId) {
@@ -3002,6 +3025,8 @@ const Absence = (() => {
 
   let fdb = null;          // مرجع قاعدة Firebase بعد الاتصال
   let connected = false;
+  // معرف عشوائي لهذا الجهاز/التبويب — لتجاهل تحديثاتنا نحن عند الاستماع
+  const CLIENT_ID = Math.random().toString(36).slice(2) + Date.now().toString(36);
 
   const b64enc = s => btoa(unescape(encodeURIComponent(s)));
 
@@ -3062,7 +3087,8 @@ const Absence = (() => {
       } catch (e) { console.error("استرجاع سحابي:", e); }
 
       publishData();
-      subscribe();
+      subscribe();          // استقبال الغيابات من الأساتذة
+      subscribePlatform();  // مزامنة حية بين أجهزتك
       // بعد كل حفظ: نشر بيانات الأساتذة + حفظ حالة المنصة كاملة في السحابة
       DB.setPersistHook(debounce(() => { publishData(); cloudSave(); }, 900));
       cloudSave();
@@ -3081,7 +3107,27 @@ const Absence = (() => {
   /** حفظ حالة المنصة كاملة في السحابة (تلاميذ، أداءات، إعدادات...) */
   function cloudSave() {
     if (!fdb) return;
-    fdb.ref("platform").set(DB.exportState()).catch(e => console.error("حفظ سحابي:", e));
+    const s = DB.exportState();
+    s.origin = CLIENT_ID;   // حتى لا نستورد ما رفعناه نحن
+    fdb.ref("platform").set(s).catch(e => console.error("حفظ سحابي:", e));
+  }
+
+  /** مزامنة حية: أي تعديل من جهاز آخر يُطبَّق هنا فورًا */
+  function subscribePlatform() {
+    if (!fdb) return;
+    fdb.ref("platform").on("value", snap => {
+      const remote = snap.exists() ? snap.val() : null;
+      if (!remote || remote.origin === CLIENT_ID) return;
+      const remoteTs = remote.meta?.ts || 0;
+      if (remoteTs > DB.localTs() || (!DB.hasLocalData() && (remote.students?.length || remote.teachers?.length))) {
+        try {
+          DB.importState(remote);
+          toast("☁ تمت المزامنة — وصل تعديل من جهاز آخر");
+          App.refresh();
+          if (document.getElementById("page-absence").classList.contains("active")) renderStats();
+        } catch (e) { console.error("مزامنة:", e); }
+      }
+    });
   }
 
   /** نشر بيانات الأساتذة والتلاميذ ليقرأها تطبيق الأستاذ لحظيًا */
