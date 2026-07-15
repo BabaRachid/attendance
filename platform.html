@@ -934,8 +934,11 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
             <option value="">— نظرة عامة (كل الأساتذة) —</option>
           </select>
         </label>
+        <label class="inline">المستوى
+          <select id="absLevelFilter" class="input" style="min-width:180px"><option value="">كل المستويات</option></select>
+        </label>
         <label class="inline">الشهر <input type="month" id="absMonth" class="input"></label>
-        <span class="hint">مع بداية كل شهر يبدأ العدّ من الصفر تلقائيًا — اختر أي شهر سابق لمراجعته.</span>
+        <span class="hint">مع بداية كل شهر يبدأ العدّ من الصفر تلقائيًا.</span>
       </div>
 
       <div class="stats-grid" id="absStatsCards"></div>
@@ -1418,6 +1421,24 @@ const DB = (() => {
     }
     // ترقية: منح رمز سري لأي أستاذ سُجّل قبل ميزة الرموز
     state.teachers.forEach(t => { if (!t.pin) t.pin = genTeacherPin(); });
+    normalizeSettings();
+  }
+
+  /** إصلاح بنية الإعدادات (السحابة تحذف الكائنات الفارغة) */
+  function normalizeSettings() {
+    const s = state.settings;
+    if (!s.pricing) s.pricing = JSON.parse(JSON.stringify(DEFAULT_PRICING));
+    ["primaire", "college", "lycee"].forEach(cy => {
+      const def = DEFAULT_PRICING[cy];
+      const cfg = s.pricing[cy] = s.pricing[cy] || JSON.parse(JSON.stringify(def));
+      if (cfg.subjects == null) cfg.subjects = {};
+      if (!Array.isArray(cfg.packs)) cfg.packs = JSON.parse(JSON.stringify(def.packs));
+      if (cfg.defaultPrice == null) cfg.defaultPrice = def.defaultPrice;
+      if (cy === "lycee" && cfg.branchSubjects == null)
+        cfg.branchSubjects = JSON.parse(JSON.stringify(def.branchSubjects));
+    });
+    if (!Array.isArray(s.subjects) || !s.subjects.length) s.subjects = [...DEFAULT_SUBJECTS];
+    if (!s.adminPin) s.adminPin = "000000";
   }
 
   let persistHook = null;   // يُستدعى بعد كل حفظ (نشر البيانات للأساتذة مباشرة)
@@ -2113,6 +2134,8 @@ const DB = (() => {
     };
     if (keepFb) state.settings.firebase = keepFb;
     if (keepUrl && !state.settings.attendanceUrl) state.settings.attendanceUrl = keepUrl;
+    normalizeSettings();
+    state.teachers.forEach(t => { if (!t.pin) t.pin = genTeacherPin(); });
     localStorage.setItem(LS_KEY, JSON.stringify(state));
   }
 
@@ -3372,9 +3395,12 @@ const Absence = (() => {
     const tid = $("absTeacherFilter").value;
     const teacher = tid ? DB.getTeacher(tid) : null;
 
+    const lvl = $("absLevelFilter").value;
+
     if (!teacher) {
-      // نظرة عامة على كل الأساتذة
-      const stats = DB.absenceStats(ym);
+      // نظرة عامة على كل الأساتذة (مع مرشح المستوى)
+      const stats = DB.absenceStats(ym)
+        .filter(x => !lvl || (x.student.level || "بدون مستوى") === lvl);
       const total = stats.reduce((t, x) => t + x.count, 0);
       $("absStatsCards").innerHTML = `
         <div class="stat red"><div class="num">${total}</div><div class="lbl">مجموع الغيابات في ${fmtMonth(ym)}</div></div>
@@ -3397,7 +3423,9 @@ const Absence = (() => {
     }
 
     // ---- عرض أستاذ محدد: كل تلاميذه مع عدد غيابات الشهر ----
-    const roster = DB.studentsOfTeacher(teacher.id);
+    const roster = DB.studentsOfTeacher(teacher.id)
+      .filter(s => !lvl || (s.level || "بدون مستوى") === lvl)
+      .sort((a, b) => (a.level || "").localeCompare(b.level || "") || a.name.localeCompare(b.name));
     const stats = DB.absenceStats(ym, teacher.id);
     const byStudent = {};
     stats.forEach(x => byStudent[x.studentId] = x);
@@ -3412,7 +3440,17 @@ const Absence = (() => {
     $("absTableHead").innerHTML =
       `<tr><th>التلميذ</th><th>المستوى</th><th>غيابات ${fmtMonth(ym)}</th><th>أيام الغياب</th><th>الحالة</th><th>إجراءات</th></tr>`;
 
-    $("absTable").querySelector("tbody").innerHTML = roster.length ? roster.map(s => {
+    // تجميع حسب المستوى: عنوان لكل قسم
+    const groups = {};
+    roster.forEach(s => {
+      const key = s.level || "بدون مستوى";
+      (groups[key] = groups[key] || []).push(s);
+    });
+
+    $("absTable").querySelector("tbody").innerHTML = roster.length
+      ? Object.keys(groups).sort().map(level =>
+        `<tr class="level-row"><td colspan="6">📚 ${esc(level)} <span class="level-count">${groups[level].length} تلميذ(ة)</span></td></tr>` +
+        groups[level].map(s => {
       const x = byStudent[s.id];
       const count = x ? x.count : 0;
       const droppedSince = s.dropped?.[teacher.subject];
@@ -3435,7 +3473,8 @@ const Absence = (() => {
                   onclick="Absence.removeFromTeacher('${s.id}','${teacher.id}')">🗑 إزالة</button>
         </td>
       </tr>`;
-    }).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا تلاميذ مسندون لهذا الأستاذ</td></tr>`;
+      }).join("")).join("")
+      : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا تلاميذ مطابقون</td></tr>`;
   }
 
   /** إزالة تلميذ من قائمة الأستاذ: يختفي فورًا من تطبيق الأستاذ */
@@ -3463,6 +3502,13 @@ const Absence = (() => {
     renderStats();
   }
 
+  function refreshLevelFilter() {
+    const cur = $("absLevelFilter").value;
+    const levels = [...new Set(DB.students.map(s => s.level || "بدون مستوى"))].sort();
+    $("absLevelFilter").innerHTML = `<option value="">كل المستويات</option>` +
+      levels.map(l => `<option ${cur === l ? "selected" : ""}>${esc(l)}</option>`).join("");
+  }
+
   function refreshTeacherFilter() {
     const cur = $("absTeacherFilter").value;
     $("absTeacherFilter").innerHTML = `<option value="">— نظرة عامة (كل الأساتذة) —</option>` +
@@ -3475,6 +3521,7 @@ const Absence = (() => {
     $("attUrl").value = DB.settings.attendanceUrl || "";
     if (DB.settings.firebase && !$("fbConfig").value) $("fbConfig").value = DB.settings.firebase;
     refreshTeacherFilter();
+    refreshLevelFilter();
     setStatus();
     renderStats();
   }
@@ -3483,6 +3530,7 @@ const Absence = (() => {
     $("absMonth").value = thisMonth();
     $("absMonth").addEventListener("change", renderStats);
     $("absTeacherFilter").addEventListener("change", renderStats);
+    $("absLevelFilter").addEventListener("change", renderStats);
     $("btnFbConnect").addEventListener("click", saveAndConnect);
     $("btnCopyAttLink").addEventListener("click", copyLink);
     $("btnCopyPlatformLink").addEventListener("click", copyPlatformLink);
@@ -3685,7 +3733,7 @@ const Settings = (() => {
     const p = DB.settings.pricing;
     const cycleBlock = (key, title) => {
       const cfg = p[key];
-      const subjectRows = Object.entries(cfg.subjects).map(([sub, price]) => `
+      const subjectRows = Object.entries(cfg.subjects || {}).map(([sub, price]) => `
         <div class="pricing-row">
           <span>${esc(sub)}</span>
           <input class="input" type="number" min="0" step="10" value="${price}"

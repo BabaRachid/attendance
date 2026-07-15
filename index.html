@@ -133,7 +133,7 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
     <div class="card" style="text-align:center">
       <img id="loginLogo" alt="" style="height:72px;margin-bottom:8px;display:none;border-radius:14px">
       <h2>الدخول إلى حسابك</h2>
-      <p class="hint">أدخل رمزك السري (4 أرقام) لعرض تلاميذك فقط.</p>
+      <p class="hint">أدخل رمزك السري (4 أرقام).</p>
       <input type="password" class="input" id="loginPin" inputmode="numeric" maxlength="8"
              placeholder="••••" autocomplete="off"
              style="text-align:center;font-size:26px;letter-spacing:12px;direction:ltr;margin:10px 0">
@@ -146,7 +146,7 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
 
   <!-- شاشة اختيار المستوى (للأستاذ متعدد المستويات) -->
   <div id="scrLevels" hidden>
-    <button class="back" id="btnLevelsBack">→ خروج من الحساب</button>
+    <button class="back" id="btnLevelsBack" style="color:var(--danger)">🚪 خروج للصفحة الرئيسية</button>
     <div class="card">
       <h2 id="levelsTitle"></h2>
       <p class="hint">اختر القسم الذي تريد تسجيل غيابه:</p>
@@ -159,7 +159,10 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
 
   <!-- شاشة 2: تسجيل الغياب -->
   <div id="scrMark" hidden>
-    <button class="back" id="btnBack">→ رجوع لاختيار الأستاذ</button>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <button class="back" id="btnBack" style="margin:0">→ رجوع لصفحة المستويات</button>
+      <button class="back" id="btnExitHome" style="margin:0;color:var(--danger)">🚪 خروج</button>
+    </div>
     <div class="card">
       <h2 id="markTitle"></h2>
       <label style="font-size:13px;font-weight:600">تاريخ الحصة
@@ -341,12 +344,7 @@ function enterAccount(id){
   teacher = DATA.teachers.find(t => t.id === id);
   if (!teacher) return;
   const levels = [...new Set(teacher.students.map(s => s.level || "بدون مستوى"))].sort();
-  if (levels.length <= 1) {
-    currentLevel = null;          // قسم واحد: عرض مباشر
-    openMark(teacher.id);
-  } else {
-    showLevels(levels);
-  }
+  showLevels(levels);   // تظهر دائمًا، حتى لو مستوى واحد
 }
 
 function showLevels(levels){
@@ -519,10 +517,10 @@ $("btnAgainLive").onclick = () => {
   levels.length > 1 ? showLevels(levels.sort()) : openMark(t.id);
 };
 $("btnBack").onclick = () => {
-  const levels = [...new Set(teacher.students.map(s => s.level || "بدون مستوى"))];
-  if (levels.length > 1) showLevels(levels.sort());
-  else showTeachers();
+  const levels = [...new Set(teacher.students.map(s => s.level || "بدون مستوى"))].sort();
+  showLevels(levels);
 };
+$("btnExitHome").onclick = showTeachers;
 $("btnLevelsBack").onclick = showTeachers;
 $("btnLogin").onclick = tryLogin;
 $("loginPin").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(); });
