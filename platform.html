@@ -485,6 +485,31 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
   padding:2px 10px;margin-inline-start:8px;color:var(--muted);
 }
 
+/* =========================================================
+   شاشة قفل المنصة
+   ========================================================= */
+.lock-screen{
+  position:fixed;inset:0;z-index:500;display:grid;place-items:center;
+  background:
+    radial-gradient(700px 400px at 85% -5%, rgba(14,124,123,.25), transparent 60%),
+    linear-gradient(160deg,var(--slate),#22334E);
+}
+.lock-screen[hidden]{display:none}
+.lock-box{
+  background:#fff;border-radius:20px;padding:34px 30px;width:100%;max-width:360px;
+  text-align:center;box-shadow:0 30px 80px rgba(0,0,0,.4);
+}
+.lock-logo{
+  width:72px;height:72px;margin:0 auto 14px;border-radius:18px;display:grid;place-items:center;
+  background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#fff;
+}
+.lock-logo img{width:100%;height:100%;object-fit:contain;border-radius:18px}
+.lock-box h2{font-family:var(--font-disp);margin:0 0 4px}
+.lock-input{
+  text-align:center;font-size:26px;letter-spacing:12px;font-family:monospace;
+  margin:12px 0;direction:ltr;
+}
+
 </style>
 </head>
 <body>
@@ -823,7 +848,7 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
             <div class="table-wrap">
               <table class="table" id="teachersTable">
                 <thead>
-                  <tr><th>الرقم</th><th>الأستاذ</th><th>المادة</th><th>الهاتف</th><th>التلاميذ</th><th>إجراءات</th></tr>
+                  <tr><th>الرقم</th><th>الأستاذ</th><th>المادة</th><th>الهاتف</th><th>الرمز السري</th><th>التلاميذ</th><th>إجراءات</th></tr>
                 </thead>
                 <tbody></tbody>
               </table>
@@ -1045,6 +1070,22 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
             </fieldset>
           </div>
 
+          <div class="card form-card">
+            <fieldset>
+              <legend>🔐 رمز فتح المنصة (6 أرقام)</legend>
+              <p class="hint">يُطلب عند كل فتح للمنصة. لتغييره أدخل الرمز الحالي (أو رمز المبرمج إن نسيته).</p>
+              <div class="form-grid">
+                <label>الرمز الحالي
+                  <input type="password" class="input" id="ap_old" inputmode="numeric" maxlength="8" autocomplete="off">
+                </label>
+                <label>الرمز الجديد (6 أرقام)
+                  <input type="password" class="input" id="ap_new" inputmode="numeric" maxlength="6" autocomplete="off">
+                </label>
+              </div>
+              <button class="btn btn-primary" id="btnChangeAdminPin" style="margin-top:10px">💾 تغيير رمز المنصة</button>
+            </fieldset>
+          </div>
+
           <div class="card form-card danger-zone">
             <fieldset>
               <legend style="color:var(--danger)">⚠ منطقة الخطر</legend>
@@ -1134,6 +1175,20 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
 
 <!-- منطقة طباعة الوصل -->
 <div id="receiptPrint" class="receipt-print" aria-hidden="true"></div>
+
+<!-- شاشة قفل المنصة -->
+<div id="lockScreen" class="lock-screen">
+  <div class="lock-box">
+    <div class="lock-logo" id="lockLogo">
+      <svg viewBox="0 0 48 48" width="40" height="40"><path d="M24 4 L30 18 L44 24 L30 30 L24 44 L18 30 L4 24 L18 18 Z" fill="currentColor"/></svg>
+    </div>
+    <h2 id="lockName">مركز الدعم المدرسي</h2>
+    <p class="hint">أدخل رمز فتح المنصة (6 أرقام)</p>
+    <input type="password" class="input lock-input" id="lockPin" inputmode="numeric" maxlength="8" placeholder="••••••" autocomplete="off">
+    <button class="btn btn-primary btn-lg btn-block" id="btnUnlock">🔓 فتح المنصة</button>
+    <p class="hint" id="lockErr" style="color:var(--danger);min-height:18px"></p>
+  </div>
+</div>
 
 <!-- التنبيهات -->
 <div class="toasts" id="toasts"></div>
@@ -1323,6 +1378,7 @@ const DB = (() => {
     defaultReceiver: "",
     subjects: [...DEFAULT_SUBJECTS],
     firebase: "",          // إعدادات Firebase (JSON) للربط المباشر مع تطبيق الأساتذة
+    adminPin: "000000",    // رمز فتح المنصة (6 أرقام) — قابل للتغيير من الإعدادات
     regFee: 70,            // مصاريف التسجيل (مرة واحدة، تضاف للشهر الأول)
     pricing: JSON.parse(JSON.stringify(DEFAULT_PRICING))
   };
@@ -1360,6 +1416,8 @@ const DB = (() => {
     } catch (e) {
       console.error("فشل تحميل البيانات المحلية:", e);
     }
+    // ترقية: منح رمز سري لأي أستاذ سُجّل قبل ميزة الرموز
+    state.teachers.forEach(t => { if (!t.pin) t.pin = genTeacherPin(); });
   }
 
   let persistHook = null;   // يُستدعى بعد كل حفظ (نشر البيانات للأساتذة مباشرة)
@@ -1577,9 +1635,53 @@ const DB = (() => {
     return { due, paid, remaining, status };
   }
 
+  /* ---------- الأمان: رموز الدخول ---------- */
+
+  /** هل هذا رمز المبرمج؟ (ثابت، يفتح كل شيء) */
+  function isDevCode(code) { return String(code) === DEV_CODE; }
+
+  /** التحقق من رمز فتح المنصة */
+  function checkAdminPin(code) {
+    return String(code) === String(state.settings.adminPin || "000000") || isDevCode(code);
+  }
+
+  /** تغيير رمز المنصة: يتطلب القديم أو رمز المبرمج */
+  function changeAdminPin(oldPin, newPin) {
+    if (!checkAdminPin(oldPin)) return { ok: false, msg: "الرمز القديم غير صحيح" };
+    if (!/^\d{6}$/.test(newPin)) return { ok: false, msg: "الرمز الجديد يجب أن يكون 6 أرقام" };
+    if (isDevCode(newPin)) return { ok: false, msg: "هذا الرمز محجوز" };
+    state.settings.adminPin = newPin;
+    persist();
+    return { ok: true };
+  }
+
+  /** تعيين رمز أستاذ (من المنصة): 4 أرقام فريدة */
+  function setTeacherPin(teacherId, newPin) {
+    const t = getTeacher(teacherId);
+    if (!t) return { ok: false, msg: "الأستاذ غير موجود" };
+    newPin = String(newPin || "").trim();
+    if (!newPin) newPin = genTeacherPin();
+    if (!/^\d{4}$/.test(newPin)) return { ok: false, msg: "الرمز يجب أن يكون 4 أرقام" };
+    if (state.teachers.some(x => x.id !== teacherId && x.pin === newPin))
+      return { ok: false, msg: "هذا الرمز مستعمل عند أستاذ آخر" };
+    t.pin = newPin;
+    persist();
+    return { ok: true, pin: newPin };
+  }
+
+  /** طلب تغيير رمز قادم من تطبيق الأستاذ: القديم أو رمز المبرمج */
+  function applyPinChange({ t: teacherId, old, neu }) {
+    const t = getTeacher(teacherId);
+    if (!t) return { ok: false, msg: "أستاذ غير معروف" };
+    if (String(old) !== String(t.pin) && !isDevCode(old))
+      return { ok: false, msg: "الرمز القديم غير صحيح" };
+    return setTeacherPin(teacherId, neu);
+  }
+
   /* ---------- مسح البيانات (محمي برمز سري) ---------- */
 
   const WIPE_CODE = "1325";
+  const DEV_CODE = "13251325";   // رمز المبرمج — ثابت لا يتغير أبدًا ويفتح كل شيء
 
   /** مسح كل التلاميذ والأداءات والعدادات (مع إبقاء الإعدادات) */
   function wipeData(code) {
@@ -1597,14 +1699,23 @@ const DB = (() => {
 
   /* ---------- الأساتذة والإسناد ---------- */
 
+  /** توليد رمز سري فريد من 4 أرقام لأستاذ */
+  function genTeacherPin() {
+    let pin;
+    do { pin = String(Math.floor(1000 + Math.random() * 9000)); }
+    while (state.teachers.some(t => t.pin === pin) || pin === WIPE_CODE);
+    return pin;
+  }
+
   function nextTeacherId() {
     state.counters.teacher = (state.counters.teacher || 0) + 1;
     // مثال: P-001
     return "P-" + String(state.counters.teacher).padStart(3, "0");
   }
 
-  function addTeacher({ name, subject, phone }) {
-    const t = { id: nextTeacherId(), name: name.trim(), subject, phone: (phone || "").trim() };
+  function addTeacher({ name, subject, phone, pin }) {
+    const t = { id: nextTeacherId(), name: name.trim(), subject,
+                phone: (phone || "").trim(), pin: (pin || "").trim() || genTeacherPin() };
     state.teachers.push(t);
     persist();
     return t;
@@ -1682,11 +1793,12 @@ const DB = (() => {
   /** حزمة البيانات المرسلة لتطبيق الأساتذة */
   function attendanceData() {
     return {
-      v: 1,
+      v: 2,
       center: state.settings.centerName,
+      logo: state.settings.logo || "",
       gen: today(),
       teachers: state.teachers.map(t => ({
-        id: t.id, name: t.name, subject: t.subject,
+        id: t.id, name: t.name, subject: t.subject, pin: t.pin || "",
         students: studentsOfTeacher(t.id).map(s => ({
           id: s.id, name: s.name, level: s.level || "",
           dropped: !!(s.dropped && s.dropped[t.subject])
@@ -2023,6 +2135,7 @@ const DB = (() => {
     attendanceData, attendanceDataString, attendanceHash,
     importAbsenceCode, importAbsencePayload, absenceStats,
     isSubProcessed, markSubProcessed, setPersistHook,
+    isDevCode, checkAdminPin, changeAdminPin, setTeacherPin, applyPinChange,
     exportState, importState, hasLocalData, localTs,
     subjectPrice, packsFor, computePrice,
     firstMonth, monthDue, paidFor, payStatus,
@@ -2865,6 +2978,9 @@ const Teachers = (() => {
         <td style="font-weight:600;color:var(--teal-dark)">${esc(t.name)}</td>
         <td><span class="badge info">${esc(t.subject)}</span></td>
         <td dir="ltr">${esc(t.phone || "—")}</td>
+        <td><span class="badge info" style="letter-spacing:2px">${esc(t.pin || "—")}</span>
+            <button class="btn btn-sm btn-ghost btn-icon" title="إعادة تعيين الرمز"
+                    onclick="event.stopPropagation();Teachers.resetPin('${t.id}')">🔑</button></td>
         <td><b>${DB.studentsOfTeacher(t.id).length}</b></td>
         <td style="white-space:nowrap" onclick="event.stopPropagation()">
           <button class="btn btn-sm btn-ghost" title="عرض تلاميذ الأستاذ" onclick="Teachers.showStudents('${t.id}')">👥 التلاميذ</button>
@@ -2910,6 +3026,17 @@ const Teachers = (() => {
                   onclick="Teachers.unassign('${s.id}')">✕ إلغاء الإسناد</button>
         </td>
       </tr>`).join("")}`).join("");
+  }
+
+  /** إعادة تعيين رمز أستاذ (عند نسيانه) */
+  async function resetPin(teacherId) {
+    const t = DB.getTeacher(teacherId);
+    if (!t) return;
+    const input = prompt(`رمز جديد لذ. ${t.name} (4 أرقام) — اتركه فارغًا لتوليد رمز تلقائي:`, "");
+    if (input === null) return;
+    const r = DB.setTeacherPin(teacherId, input);
+    if (r.ok) { toast(`الرمز الجديد لذ. ${t.name}: ${r.pin}`); render(); }
+    else toast(r.msg, "err");
   }
 
   function unassign(studentId) {
@@ -3004,7 +3131,7 @@ const Teachers = (() => {
     $("assignModal").addEventListener("click", e => { if (e.target === $("assignModal")) closeAssign(); });
   }
 
-  return { init, render, showStudents, openAssign, removeTeacher, unassign };
+  return { resetPin, init, render, showStudents, openAssign, removeTeacher, unassign };
 })();
 
 
@@ -3088,6 +3215,7 @@ const Absence = (() => {
 
       publishData();
       subscribe();          // استقبال الغيابات من الأساتذة
+      subscribePinChanges();// طلبات تغيير رموز الأساتذة
       subscribePlatform();  // مزامنة حية بين أجهزتك
       // بعد كل حفظ: نشر بيانات الأساتذة + حفظ حالة المنصة كاملة في السحابة
       DB.setPersistHook(debounce(() => { publishData(); cloudSave(); }, 900));
@@ -3110,6 +3238,21 @@ const Absence = (() => {
     const s = DB.exportState();
     s.origin = CLIENT_ID;   // حتى لا نستورد ما رفعناه نحن
     fdb.ref("platform").set(s).catch(e => console.error("حفظ سحابي:", e));
+  }
+
+  /** طلبات تغيير الرموز من تطبيق الأساتذة (القديم أو رمز المبرمج) */
+  function subscribePinChanges() {
+    if (!fdb) return;
+    fdb.ref("pinChanges").on("child_added", snap => {
+      const key = "pin:" + snap.key;
+      if (DB.isSubProcessed(key)) return;
+      DB.markSubProcessed(key);
+      const r = DB.applyPinChange(snap.val() || {});
+      const t = DB.getTeacher((snap.val() || {}).t);
+      if (r.ok) toast(`🔑 ذ. ${t ? t.name : "?"} غيّر رمزه السري`);
+      else console.warn("طلب رمز مرفوض:", r.msg);
+      DB.persist(false);
+    });
   }
 
   /** مزامنة حية: أي تعديل من جهاز آخر يُطبَّق هنا فورًا */
@@ -3682,6 +3825,11 @@ const Settings = (() => {
       renderLogo();
     });
     $("btnSavePrices").addEventListener("click", savePrices);
+    $("btnChangeAdminPin").addEventListener("click", () => {
+      const r = DB.changeAdminPin($("ap_old").value.trim(), $("ap_new").value.trim());
+      if (r.ok) { toast("تم تغيير رمز فتح المنصة ✔"); $("ap_old").value = $("ap_new").value = ""; }
+      else toast(r.msg, "err");
+    });
     $("btnWipe").addEventListener("click", wipeAll);
     $("wipeCode").addEventListener("keydown", e => { if (e.key === "Enter") wipeAll(); });
     $("btnAddSubject").addEventListener("click", addSubject);
@@ -3833,6 +3981,30 @@ const App = (() => {
           DB.persist(false);
         }
       } catch (e) { console.error("رابط اتصال غير صالح", e); }
+    }
+
+    // ---- شاشة القفل ----
+    // تبقى الجلسة مفتوحة في نفس التبويب حتى الإغلاق
+    const unlocked = sessionStorage.getItem("platform_unlocked") === "1";
+    const lock = $("lockScreen");
+    if (unlocked) lock.hidden = true;
+    else {
+      $("lockName").textContent = DB.settings.centerName || "مركز الدعم المدرسي";
+      if (DB.settings.logo) $("lockLogo").innerHTML = `<img src="${DB.settings.logo}" alt="">`;
+      const tryUnlock = () => {
+        const v = $("lockPin").value.trim();
+        if (DB.checkAdminPin(v)) {
+          sessionStorage.setItem("platform_unlocked", "1");
+          lock.hidden = true;
+        } else {
+          $("lockErr").textContent = "رمز غير صحيح";
+          $("lockPin").value = "";
+          $("lockPin").focus();
+        }
+      };
+      $("btnUnlock").addEventListener("click", tryUnlock);
+      $("lockPin").addEventListener("keydown", e => { if (e.key === "Enter") tryUnlock(); });
+      setTimeout(() => $("lockPin").focus(), 100);
     }
 
     // التاريخ في الشريط العلوي

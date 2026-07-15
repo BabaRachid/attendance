@@ -128,14 +128,33 @@ h2{font-family:Cairo;font-size:17px;margin:0 0 10px}
     <p class="hint">اطلب من إدارة المركز رابطًا محدثًا، أو تأكد من وجود ملف data.json بجانب هذه الصفحة.</p>
   </div>
 
-  <!-- شاشة 1: اختيار الأستاذ -->
+  <!-- شاشة 1: الدخول بالرمز السري -->
   <div id="scrTeachers" hidden>
-    <div class="card">
-      <h2>من أنت؟</h2>
-      <p class="hint">اختر اسمك للدخول إلى قائمة تلاميذك.</p>
+    <div class="card" style="text-align:center">
+      <img id="loginLogo" alt="" style="height:72px;margin-bottom:8px;display:none;border-radius:14px">
+      <h2>الدخول إلى حسابك</h2>
+      <p class="hint">أدخل رمزك السري (4 أرقام) لعرض تلاميذك فقط.</p>
+      <input type="password" class="input" id="loginPin" inputmode="numeric" maxlength="8"
+             placeholder="••••" autocomplete="off"
+             style="text-align:center;font-size:26px;letter-spacing:12px;direction:ltr;margin:10px 0">
+      <button class="btn btn-primary" id="btnLogin">🔓 دخول</button>
+      <p class="hint" id="loginErr" style="color:var(--danger);min-height:18px"></p>
     </div>
-    <div id="teachersList"></div>
+    <div id="teachersList" hidden></div>
     <p class="hint" style="text-align:center" id="genInfo"></p>
+  </div>
+
+  <!-- شاشة اختيار المستوى (للأستاذ متعدد المستويات) -->
+  <div id="scrLevels" hidden>
+    <button class="back" id="btnLevelsBack">→ خروج من الحساب</button>
+    <div class="card">
+      <h2 id="levelsTitle"></h2>
+      <p class="hint">اختر القسم الذي تريد تسجيل غيابه:</p>
+    </div>
+    <div id="levelsList"></div>
+    <div class="card">
+      <button class="btn btn-ghost" id="btnChangePin">🔑 تغيير رمزي السري</button>
+    </div>
   </div>
 
   <!-- شاشة 2: تسجيل الغياب -->
@@ -208,6 +227,8 @@ let DATA = null;          // { center, gen, teachers:[{id,name,subject,students:
 let fdb = null;           // قاعدة Firebase عند الربط المباشر (#F1)
 let LEGACY = false;       // true = رابط قديم (#D1 أو data.json) غير مباشر
 let teacher = null;       // الأستاذ المختار
+let currentLevel = null;  // المستوى المعروض حاليًا (null = كل تلاميذه في مستوى واحد)
+let devMode = false;      // دخل برمز المبرمج
 let absent = new Set();   // الغائبون في هذه الحصة
 let dropped = new Set();  // المعلَّمون كمنقطعين الآن
 let returned = new Set(); // من أُلغي انقطاعهم الآن
@@ -276,27 +297,91 @@ async function loadData(){
   return null;
 }
 
+const DEV_CODE = "13251325";   // رمز المبرمج — يعمل في كل مكان
+
+/* شاشة الدخول: لا تُعرض أي معلومات عن الأساتذة */
 function showTeachers(){
-  $("scrMark").hidden = true; $("scrCode").hidden = true; $("counterBar").hidden = true;
+  ["scrMark","scrCode","scrLevels"].forEach(id => $(id).hidden = true);
+  $("counterBar").hidden = true;
   $("scrTeachers").hidden = false;
-  $("teachersList").innerHTML = DATA.teachers.map(t => `
-    <button class="teacher-btn" data-id="${t.id}">
-      <span class="avatar">${(t.name||"?").trim()[0]}</span>
-      <span><b>ذ. ${t.name}</b><small>${t.subject} — ${t.students.length} تلميذ(ة)</small></span>
-    </button>`).join("") || '<div class="card hint">لا يوجد أساتذة في البيانات.</div>';
-  document.querySelectorAll(".teacher-btn").forEach(b =>
-    b.onclick = () => openMark(b.dataset.id));
+  $("teachersList").hidden = true;
+  teacher = null; currentLevel = null; devMode = false;
+  if (DATA.logo) { $("loginLogo").src = DATA.logo; $("loginLogo").style.display = "inline-block"; }
+  $("loginPin").value = ""; $("loginErr").textContent = "";
+  setTimeout(() => $("loginPin").focus(), 100);
+}
+
+function tryLogin(){
+  const pin = $("loginPin").value.trim();
+  if (pin === DEV_CODE) {
+    // وضع المبرمج: لائحة كل الأساتذة للدخول لأي حساب
+    devMode = true;
+    $("teachersList").hidden = false;
+    $("teachersList").innerHTML = '<div class="card hint" style="text-align:center">🛠 وضع المبرمج — اختر أي حساب</div>' +
+      DATA.teachers.map(t => `
+      <button class="teacher-btn" data-id="${t.id}">
+        <span class="avatar">${(t.name||"?").trim()[0]}</span>
+        <span><b>ذ. ${t.name}</b><small>${t.subject} — الرمز: ${t.pin || "—"}</small></span>
+      </button>`).join("");
+    document.querySelectorAll(".teacher-btn").forEach(b =>
+      b.onclick = () => enterAccount(b.dataset.id));
+    return;
+  }
+  const t = DATA.teachers.find(x => x.pin && x.pin === pin);
+  if (!t) {
+    $("loginErr").textContent = "رمز غير صحيح";
+    $("loginPin").value = ""; $("loginPin").focus();
+    return;
+  }
+  enterAccount(t.id);
+}
+
+/* دخول الحساب: مستوى واحد → القائمة مباشرة، عدة مستويات → أزرار الأقسام */
+function enterAccount(id){
+  teacher = DATA.teachers.find(t => t.id === id);
+  if (!teacher) return;
+  const levels = [...new Set(teacher.students.map(s => s.level || "بدون مستوى"))].sort();
+  if (levels.length <= 1) {
+    currentLevel = null;          // قسم واحد: عرض مباشر
+    openMark(teacher.id);
+  } else {
+    showLevels(levels);
+  }
+}
+
+function showLevels(levels){
+  ["scrTeachers","scrMark","scrCode"].forEach(id => $(id).hidden = true);
+  $("counterBar").hidden = true;
+  $("scrLevels").hidden = false;
+  $("levelsTitle").textContent = `ذ. ${teacher.name} — ${teacher.subject}`;
+  $("levelsList").innerHTML = levels.map(lv => {
+    const n = teacher.students.filter(s => (s.level || "بدون مستوى") === lv).length;
+    return `
+    <button class="teacher-btn" data-level="${lv}">
+      <span class="avatar">📚</span>
+      <span><b>${lv}</b><small>${n} تلميذ(ة)</small></span>
+    </button>`;
+  }).join("");
+  $("levelsList").querySelectorAll("[data-level]").forEach(b =>
+    b.onclick = () => { currentLevel = b.dataset.level; openMark(teacher.id); });
+}
+
+function markedStudents(){
+  return currentLevel
+    ? teacher.students.filter(s => (s.level || "بدون مستوى") === currentLevel)
+    : teacher.students;
 }
 
 function openMark(id){
-  teacher = DATA.teachers.find(t => t.id === id);
+  teacher = DATA.teachers.find(t => t.id === id) || teacher;
   if (!teacher) return;
   absent.clear(); dropped.clear(); returned.clear();
-  teacher.students.forEach(s => { if (s.dropped) dropped.add(s.id); });
+  markedStudents().forEach(s => { if (s.dropped) dropped.add(s.id); });
 
-  $("scrTeachers").hidden = true; $("scrCode").hidden = true;
+  ["scrTeachers","scrCode","scrLevels"].forEach(x => $(x).hidden = true);
   $("scrMark").hidden = false; $("counterBar").hidden = false;
-  $("markTitle").textContent = `ذ. ${teacher.name} — ${teacher.subject}`;
+  $("markTitle").textContent = `ذ. ${teacher.name} — ${teacher.subject}` +
+    (currentLevel ? ` — ${currentLevel}` : "");
   $("sessionDate").value = todayStr();
   renderStudents();
 }
@@ -304,7 +389,7 @@ function openMark(id){
 function renderStudents(){
   // تجميع التلاميذ حسب المستوى — كل قسم لوحده
   const groups = {};
-  teacher.students.forEach(s => {
+  markedStudents().forEach(s => {
     const key = s.level || "بدون مستوى";
     (groups[key] = groups[key] || []).push(s);
   });
@@ -342,7 +427,7 @@ window.toggleAbsent = (id, on) => {
 };
 
 window.toggleDrop = (id) => {
-  const s = teacher.students.find(x => x.id === id);
+  const s = markedStudents().find(x => x.id === id);
   const wasOriginallyDropped = !!s.dropped;
   if (dropped.has(id)) {
     dropped.delete(id);
@@ -356,8 +441,9 @@ window.toggleDrop = (id) => {
 };
 
 function updateCounter(){
+  const total = markedStudents().length;
   $("counterNums").innerHTML =
-    `الغائبون: <b>${absent.size}</b> — المنقطعون: ${dropped.size} — الحاضرون: ${teacher.students.length - absent.size - dropped.size}`;
+    `الغائبون: <b>${absent.size}</b> — المنقطعون: ${dropped.size} — الحاضرون: ${total - absent.size - dropped.size}`;
 }
 
 /* بناء رمز الغياب وإرساله */
@@ -426,11 +512,38 @@ $("btnSend").onclick = async () => {
 
 $("btnAgain").onclick = () => openMark(teacher.id);
 $("btnAgainLive").onclick = () => {
-  // إعادة قراءة بيانات الأستاذ المحدثة (قد يكون أضيف/أزيل تلميذ)
   const t = DATA.teachers.find(x => x.id === teacher.id);
-  t ? openMark(t.id) : showTeachers();
+  if (!t) { showTeachers(); return; }
+  teacher = t;
+  const levels = [...new Set(t.students.map(s => s.level || "بدون مستوى"))];
+  levels.length > 1 ? showLevels(levels.sort()) : openMark(t.id);
 };
-$("btnBack").onclick = showTeachers;
+$("btnBack").onclick = () => {
+  const levels = [...new Set(teacher.students.map(s => s.level || "بدون مستوى"))];
+  if (levels.length > 1) showLevels(levels.sort());
+  else showTeachers();
+};
+$("btnLevelsBack").onclick = showTeachers;
+$("btnLogin").onclick = tryLogin;
+$("loginPin").addEventListener("keydown", e => { if (e.key === "Enter") tryLogin(); });
+
+/* تغيير الرمز السري: يتطلب القديم أو رمز المبرمج، ويُرسل للمنصة لاعتماده */
+$("btnChangePin").onclick = async () => {
+  const old = prompt("أدخل رمزك القديم:");
+  if (old === null) return;
+  if (old !== teacher.pin && old !== DEV_CODE) { alert("الرمز القديم غير صحيح"); return; }
+  const neu = prompt("الرمز الجديد (4 أرقام):");
+  if (neu === null) return;
+  if (!/^\d{4}$/.test(neu)) { alert("يجب أن يكون 4 أرقام"); return; }
+  if (fdb) {
+    try {
+      await fdb.ref("pinChanges").push({ t: teacher.id, old, neu, ts: Date.now() });
+      alert("تم إرسال الطلب — سيُفعَّل رمزك الجديد خلال لحظات ما دامت المنصة متصلة.");
+    } catch(e){ alert("تعذر الإرسال — حاول لاحقًا"); }
+  } else {
+    alert("تغيير الرمز يتطلب الوضع المباشر — أخبر إدارة المركز.");
+  }
+};
 
 /* الانطلاق */
 (async () => {
