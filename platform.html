@@ -510,6 +510,28 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
   margin:12px 0;direction:ltr;
 }
 
+/* =========================================================
+   الأكورديون (أزرار المستويات المنسدلة)
+   ========================================================= */
+.acc-btn{
+  display:flex;justify-content:space-between;align-items:center;width:100%;
+  font:inherit;font-family:var(--font-disp);font-weight:800;font-size:14px;
+  color:var(--teal-dark);cursor:pointer;text-align:right;
+  background:linear-gradient(90deg,#E7F1F1,#F6FAF9);
+  border:1.5px solid var(--line);border-inline-start:4px solid var(--teal);
+  border-radius:10px;padding:11px 14px;margin:8px 0 0;
+  transition:box-shadow .12s;
+}
+.acc-btn:hover{box-shadow:0 4px 12px rgba(14,124,123,.15)}
+.acc-btn .acc-meta{font-family:var(--font-body);font-weight:600;font-size:12px;color:var(--muted);display:flex;align-items:center;gap:8px}
+.acc-btn .chev{display:inline-block;transition:transform .18s;font-style:normal}
+.acc-btn.open{border-inline-start-color:var(--amber)}
+.acc-btn.open .chev{transform:rotate(180deg)}
+.acc-body{
+  border:1px solid var(--line);border-top:none;border-radius:0 0 10px 10px;
+  padding:4px 8px;background:#FDFEFE;animation:fade .15s ease;
+}
+
 </style>
 </head>
 <body>
@@ -3082,9 +3104,13 @@ const Teachers = (() => {
     $("assignTitle").textContent = `إسناد التلاميذ — الأستاذ ${t.name}`;
     $("assignHint").textContent = `القائمة تعرض جميع التلاميذ الذين يدرسون مادة "${t.subject}". حدد من تريد إسناده لهذا الأستاذ.`;
     $("assignSearch").value = "";
+    assignOpenLevels = new Set();
     renderAssignList();
     $("assignModal").hidden = false;
   }
+
+  // المستويات المفتوحة حاليًا في نافذة الإسناد (تُحفظ بين إعادة الرسم)
+  let assignOpenLevels = new Set();
 
   function renderAssignList() {
     const t = DB.getTeacher(assignTeacherId);
@@ -3093,20 +3119,52 @@ const Teachers = (() => {
     const list = DB.studentsOfSubject(t.subject)
       .filter(s => !q || s.name.toLowerCase().includes(q) || (s.id || "").toLowerCase().includes(q));
 
-    $("assignList").innerHTML = list.length ? list.map(s => {
-      const assignedTo = s.teachers?.[t.subject] || "";
-      const other = assignedTo && assignedTo !== t.id ? DB.getTeacher(assignedTo) : null;
+    // تجميع حسب المستوى — كل مستوى زر ينسدل تحته تلاميذه
+    const groups = {};
+    list.forEach(s => {
+      const key = (s.level || "بدون مستوى") + (s.branch ? " — " + s.branch : "");
+      (groups[key] = groups[key] || []).push(s);
+    });
+    // أثناء البحث تُفتح كل المجموعات تلقائيًا لرؤية النتائج
+    const levels = Object.keys(groups).sort();
+
+    $("assignList").innerHTML = levels.length ? levels.map(level => {
+      const open = q ? true : assignOpenLevels.has(level);
+      const assignedCount = groups[level].filter(s => (s.teachers?.[t.subject] || "") === t.id).length;
       return `
-      <label class="assign-item">
-        <input type="checkbox" value="${esc(s.id)}" ${assignedTo === t.id ? "checked" : ""}>
-        <div>
-          <div class="ai-name">${esc(s.name)} <small style="color:var(--muted)">${esc(s.id)}</small></div>
-          <div class="ai-meta">${esc(s.level || "")}${s.branch ? " — " + esc(s.branch) : ""}</div>
-        </div>
-        ${other ? `<span class="ai-other">مسند لـ: ${esc(other.name)}</span>` : ""}
-      </label>`;
+      <button type="button" class="acc-btn ${open ? "open" : ""}" data-acc="${esc(level)}">
+        <span>📚 ${esc(level)}</span>
+        <span class="acc-meta">${assignedCount} / ${groups[level].length} مسند <b class="chev">▾</b></span>
+      </button>
+      <div class="acc-body" data-body="${esc(level)}" ${open ? "" : "hidden"}>
+        ${groups[level].map(s => {
+          const assignedTo = s.teachers?.[t.subject] || "";
+          const other = assignedTo && assignedTo !== t.id ? DB.getTeacher(assignedTo) : null;
+          return `
+          <label class="assign-item">
+            <input type="checkbox" value="${esc(s.id)}" ${assignedTo === t.id ? "checked" : ""}>
+            <div>
+              <div class="ai-name">${esc(s.name)} <small style="color:var(--muted)">${esc(s.id)}</small></div>
+              <div class="ai-meta">${esc(s.class || "")}</div>
+            </div>
+            ${other ? `<span class="ai-other">مسند لـ: ${esc(other.name)}</span>` : ""}
+          </label>`;
+        }).join("")}
+      </div>`;
     }).join("")
     : `<div style="padding:20px;text-align:center;color:var(--muted)">لا يوجد تلاميذ مسجلون في مادة "${esc(t.subject)}"</div>`;
+
+    // فتح/إغلاق كل مستوى بضغطة على زره (التحديدات محفوظة لأن العناصر تبقى في الصفحة)
+    $("assignList").querySelectorAll(".acc-btn").forEach(btn => {
+      btn.onclick = () => {
+        const level = btn.dataset.acc;
+        const body = $("assignList").querySelector(`[data-body="${CSS.escape(level)}"]`);
+        const nowOpen = body.hidden;
+        body.hidden = !nowOpen;
+        btn.classList.toggle("open", nowOpen);
+        nowOpen ? assignOpenLevels.add(level) : assignOpenLevels.delete(level);
+      };
+    });
   }
 
   function saveAssign() {
