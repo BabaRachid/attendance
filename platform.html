@@ -532,6 +532,29 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
   padding:4px 8px;background:#FDFEFE;animation:fade .15s ease;
 }
 
+/* =========================================================
+   التبويبات: الأزرار تبقى في الأعلى واللائحة تحتها
+   ========================================================= */
+.tabs-row{display:flex;flex-wrap:wrap;gap:8px;margin:10px 0}
+.tab-btn{
+  font:inherit;font-weight:700;font-size:13.5px;cursor:pointer;
+  background:#fff;color:var(--slate);
+  border:1.5px solid var(--line);border-radius:999px;padding:8px 16px;
+  display:inline-flex;align-items:center;gap:7px;
+  transition:border-color .12s,background .12s,box-shadow .12s;
+}
+.tab-btn:hover{border-color:var(--teal)}
+.tab-btn.active{
+  background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#fff;
+  border-color:var(--teal-dark);box-shadow:0 4px 12px rgba(14,124,123,.3);
+}
+.tab-btn .tab-count{
+  background:rgba(0,0,0,.08);border-radius:999px;padding:1px 9px;font-size:11.5px;
+}
+.tab-btn.active .tab-count{background:rgba(255,255,255,.25)}
+.tab-btn.tab-all{border-style:dashed}
+.tabs-label{font-size:12.5px;font-weight:700;color:var(--muted);margin:8px 0 0}
+
 </style>
 </head>
 <body>
@@ -886,6 +909,8 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
             <h2 id="teacherStudentsTitle">تلاميذ الأستاذ</h2>
             <button class="btn btn-primary" id="btnOpenAssign">⇄ إسناد التلاميذ</button>
           </div>
+          <p class="tabs-label">اضغط على قسم لعرض تلاميذه — وضغطة أخرى لإخفائهم:</p>
+          <div class="tabs-row" id="teacherLevelTabs"></div>
           <div class="table-wrap">
             <table class="table" id="teacherStudentsTable">
               <thead>
@@ -951,19 +976,27 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
       </div>
 
       <div class="card slim">
-        <label class="inline">الأستاذ
-          <select id="absTeacherFilter" class="input" style="min-width:260px">
-            <option value="">— نظرة عامة (كل الأساتذة) —</option>
+        <label class="inline">المدة
+          <select id="absMode" class="input">
+            <option value="day">يوم محدد</option>
+            <option value="month">شهر كامل</option>
           </select>
         </label>
-        <label class="inline">المستوى
-          <select id="absLevelFilter" class="input" style="min-width:180px"><option value="">كل المستويات</option></select>
-        </label>
-        <label class="inline">الشهر <input type="month" id="absMonth" class="input"></label>
-        <span class="hint">مع بداية كل شهر يبدأ العدّ من الصفر تلقائيًا.</span>
+        <label class="inline" id="wrapAbsDay">التاريخ <input type="date" id="absDay" class="input"></label>
+        <label class="inline" id="wrapAbsMonth" hidden>الشهر <input type="month" id="absMonth" class="input"></label>
+        <span class="hint">البيانات لا تُمسح أبدًا — اختر أي يوم أو شهر من التقويم لمراجعته.</span>
       </div>
 
       <div class="stats-grid" id="absStatsCards"></div>
+
+      <div class="card">
+        <p class="tabs-label">الأساتذة الذين لديهم غيابات في هذه المدة — اضغط على أستاذ لعرض أقسامه:</p>
+        <div class="tabs-row" id="absTeacherTabs"></div>
+        <div id="absLevelWrap" hidden>
+          <p class="tabs-label">أقسام الأستاذ — اضغط على قسم لعرض غائبيه:</p>
+          <div class="tabs-row" id="absLevelTabs"></div>
+        </div>
+      </div>
 
       <div class="card">
         <div class="card-head"><h2>قائمة التلاميذ والغيابات</h2></div>
@@ -3038,9 +3071,13 @@ const Teachers = (() => {
 
   /* =============== تلاميذ الأستاذ =============== */
 
+  // المستوى المختار في بطاقة تلاميذ الأستاذ (تبويبات)
+  let cardLevel = "";
+
   function showStudents(teacherId) {
     const t = DB.getTeacher(teacherId);
     if (!t) return;
+    if (currentTeacherId !== teacherId) cardLevel = "";   // أستاذ جديد → لا مستوى مختارًا
     currentTeacherId = teacherId;
     renderTable();   // لتمييز الصف النشط
 
@@ -3049,17 +3086,35 @@ const Teachers = (() => {
     $("teacherStudentsTitle").textContent = `تلاميذ الأستاذ ${t.name} — ${t.subject} (${list.length})`;
     $("teacherStudentsEmpty").hidden = list.length > 0;
 
-    // تجميع التلاميذ حسب المستوى (كل قسم لوحده)
+    // تجميع حسب المستوى
     const groups = {};
     list.forEach(s => {
       const key = (s.level || "بدون مستوى") + (s.branch ? " — " + s.branch : "");
       (groups[key] = groups[key] || []).push(s);
     });
+    const levels = Object.keys(groups).sort();
+    if (cardLevel && !groups[cardLevel]) cardLevel = "";
 
-    $("teacherStudentsTable").querySelector("tbody").innerHTML =
-      Object.keys(groups).sort().map(level => `
-      <tr class="level-row"><td colspan="5">📚 ${esc(level)} <span class="level-count">${groups[level].length} تلميذ(ة)</span></td></tr>
-      ${groups[level].map(s => `
+    // صف الأزرار: يبقى دائمًا في الأعلى — الضغط يعرض اللائحة تحته، وضغطة أخرى تطويها
+    $("teacherLevelTabs").innerHTML = levels.map(lv => `
+      <button type="button" class="tab-btn ${cardLevel === lv ? "active" : ""}" data-lv="${esc(lv)}">
+        📚 ${esc(lv)} <span class="tab-count">${groups[lv].length}</span>
+      </button>`).join("");
+    $("teacherLevelTabs").querySelectorAll(".tab-btn").forEach(btn => {
+      btn.onclick = () => {
+        cardLevel = (cardLevel === btn.dataset.lv) ? "" : btn.dataset.lv;
+        showStudents(teacherId);
+      };
+    });
+
+    // اللائحة: تلاميذ المستوى المختار فقط (أو رسالة اختيار)
+    const tbody = $("teacherStudentsTable").querySelector("tbody");
+    $("teacherStudentsTable").hidden = !cardLevel;
+    if (!cardLevel) {
+      tbody.innerHTML = "";
+      return;
+    }
+    tbody.innerHTML = groups[cardLevel].map(s => `
       <tr>
         <td>${esc(s.id)}</td>
         <td><a href="#" onclick="Students.view('${s.id}');return false"
@@ -3070,7 +3125,7 @@ const Teachers = (() => {
           <button class="btn btn-sm btn-ghost" style="color:var(--danger)"
                   onclick="Teachers.unassign('${s.id}')">✕ إلغاء الإسناد</button>
         </td>
-      </tr>`).join("")}`).join("");
+      </tr>`).join("");
   }
 
   /** إعادة تعيين رمز أستاذ (عند نسيانه) */
@@ -3447,92 +3502,149 @@ const Absence = (() => {
 
   /* =============== متابعة الغياب حسب الأستاذ =============== */
 
-  function renderStats() {
-    if (!$("absMonth")) return;
-    const ym = $("absMonth").value || thisMonth();
-    const tid = $("absTeacherFilter").value;
-    const teacher = tid ? DB.getTeacher(tid) : null;
+  // حالة العرض الهرمي: أستاذ مختار ← مستوى مختار
+  let selTeacher = "";
+  let selLevel = "";
 
-    const lvl = $("absLevelFilter").value;
-
-    if (!teacher) {
-      // نظرة عامة على كل الأساتذة (مع مرشح المستوى)
-      const stats = DB.absenceStats(ym)
-        .filter(x => !lvl || (x.student.level || "بدون مستوى") === lvl);
-      const total = stats.reduce((t, x) => t + x.count, 0);
-      $("absStatsCards").innerHTML = `
-        <div class="stat red"><div class="num">${total}</div><div class="lbl">مجموع الغيابات في ${fmtMonth(ym)}</div></div>
-        <div class="stat"><div class="num">${DB.teachers.length}</div><div class="lbl">عدد الأساتذة</div></div>`;
-      $("absTableHead").innerHTML =
-        `<tr><th>التلميذ</th><th>المادة</th><th>الأستاذ</th><th>غيابات ${fmtMonth(ym)}</th><th>أيام الغياب</th><th>الحالة</th></tr>`;
-      $("absTable").querySelector("tbody").innerHTML = stats.length ? stats.map(x => {
-        const t = DB.getTeacher(x.teacherId);
-        const droppedSince = x.student.dropped?.[x.subject];
-        return `<tr>
-          <td><b>${esc(x.student.name)}</b> <small style="color:var(--muted)">${esc(x.student.id)}</small></td>
-          <td>${esc(x.subject)}</td>
-          <td>${t ? "ذ. " + esc(t.name) : "—"}</td>
-          <td><b style="color:${x.count >= 3 ? "var(--danger)" : "inherit"}">${x.count}</b></td>
-          <td class="subjects-cell">${x.dates.sort().map(d => d.slice(8)).join("، ")}</td>
-          <td>${droppedSince ? `<span class="badge late">⛔ منقطع</span>` : `<span class="badge ok">يواصل</span>`}</td>
-        </tr>`;
-      }).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا غيابات هذا الشهر — اختر أستاذًا لعرض كل تلاميذه</td></tr>`;
-      return;
+  /** سجلات الغياب في المدة المختارة (يوم أو شهر) */
+  function periodRecords() {
+    const mode = $("absMode").value;
+    if (mode === "day") {
+      const d = $("absDay").value || today();
+      return { label: "يوم " + fmtDate(d), mode, records: DB.absences.filter(r => r.date === d) };
     }
+    const m = $("absMonth").value || thisMonth();
+    return { label: "شهر " + fmtMonth(m), mode, records: DB.absences.filter(r => r.month === m) };
+  }
 
-    // ---- عرض أستاذ محدد: كل تلاميذه مع عدد غيابات الشهر ----
-    const roster = DB.studentsOfTeacher(teacher.id)
-      .filter(s => !lvl || (s.level || "بدون مستوى") === lvl)
-      .sort((a, b) => (a.level || "").localeCompare(b.level || "") || a.name.localeCompare(b.name));
-    const stats = DB.absenceStats(ym, teacher.id);
-    const byStudent = {};
-    stats.forEach(x => byStudent[x.studentId] = x);
-    const totalAbs = stats.reduce((t, x) => t + x.count, 0);
-    const droppedCount = roster.filter(s => s.dropped?.[teacher.subject]).length;
+  function renderStats() {
+    if (!$("absMode")) return;
+    const { label, mode, records } = periodRecords();
 
+    // ---- بطاقات موجزة ----
+    const uniqueStudents = new Set(records.map(r => r.studentId)).size;
+    const droppedCount = DB.students.filter(s => s.dropped && Object.keys(s.dropped).length).length;
     $("absStatsCards").innerHTML = `
-      <div class="stat"><div class="num">${roster.length}</div><div class="lbl">تلاميذ ذ. ${esc(teacher.name)}</div></div>
-      <div class="stat red"><div class="num">${totalAbs}</div><div class="lbl">غيابات ${fmtMonth(ym)}</div></div>
-      <div class="stat amber"><div class="num">${droppedCount}</div><div class="lbl">منقطعون</div></div>`;
+      <div class="stat red"><div class="num">${records.length}</div><div class="lbl">غيابات ${esc(label)}</div></div>
+      <div class="stat"><div class="num">${uniqueStudents}</div><div class="lbl">تلاميذ تغيبوا في هذه المدة</div></div>
+      <div class="stat amber"><div class="num">${droppedCount}</div><div class="lbl">منقطعون حاليًا</div></div>`;
 
-    $("absTableHead").innerHTML =
-      `<tr><th>التلميذ</th><th>المستوى</th><th>غيابات ${fmtMonth(ym)}</th><th>أيام الغياب</th><th>الحالة</th><th>إجراءات</th></tr>`;
+    // ---- تبويبات الأساتذة (تبقى دائمًا في الأعلى) ----
+    const byTeacher = {};
+    records.forEach(r => { (byTeacher[r.teacherId] = byTeacher[r.teacherId] || []).push(r); });
+    const teacherIds = Object.keys(byTeacher)
+      .sort((a, b) => byTeacher[b].length - byTeacher[a].length);
+    if (selTeacher && !byTeacher[selTeacher]) { selTeacher = ""; selLevel = ""; }
 
-    // تجميع حسب المستوى: عنوان لكل قسم
-    const groups = {};
-    roster.forEach(s => {
-      const key = s.level || "بدون مستوى";
-      (groups[key] = groups[key] || []).push(s);
+    $("absTeacherTabs").innerHTML =
+      `<button type="button" class="tab-btn tab-all ${!selTeacher ? "active" : ""}" data-t="">
+         👁 عرض الكل <span class="tab-count">${records.length}</span>
+       </button>` +
+      teacherIds.map(tid => {
+        const t = DB.getTeacher(tid);
+        return `
+        <button type="button" class="tab-btn ${selTeacher === tid ? "active" : ""}" data-t="${esc(tid)}">
+          🎓 ${t ? "ذ. " + esc(t.name) : esc(tid)} <span class="tab-count">${byTeacher[tid].length}</span>
+        </button>`;
+      }).join("");
+    $("absTeacherTabs").querySelectorAll(".tab-btn").forEach(btn => {
+      btn.onclick = () => {
+        const tid = btn.dataset.t;
+        if (tid === selTeacher || tid === "") { selTeacher = ""; selLevel = ""; }
+        else { selTeacher = tid; selLevel = ""; }
+        renderStats();
+      };
     });
 
-    $("absTable").querySelector("tbody").innerHTML = roster.length
-      ? Object.keys(groups).sort().map(level =>
-        `<tr class="level-row"><td colspan="6">📚 ${esc(level)} <span class="level-count">${groups[level].length} تلميذ(ة)</span></td></tr>` +
-        groups[level].map(s => {
-      const x = byStudent[s.id];
-      const count = x ? x.count : 0;
-      const droppedSince = s.dropped?.[teacher.subject];
-      return `<tr ${droppedSince ? 'style="background:#FCF6EA"' : ""}>
-        <td><a href="#" onclick="Students.view('${s.id}');return false"
-               style="color:var(--teal-dark);font-weight:600">${esc(s.name)}</a>
-            <small style="color:var(--muted)">${esc(s.id)}</small></td>
-        <td>${esc(s.level || "—")}</td>
-        <td><b style="color:${count >= 3 ? "var(--danger)" : "inherit"};font-size:16px">${count}</b></td>
-        <td class="subjects-cell">${x ? x.dates.sort().map(d => d.slice(8)).join("، ") : "—"}</td>
-        <td>${droppedSince
-          ? `<span class="badge late">⛔ منقطع منذ ${esc(fmtDate(droppedSince))}</span>`
-          : `<span class="badge ok">يواصل</span>`}</td>
-        <td style="white-space:nowrap">
-          ${droppedSince
-            ? `<button class="btn btn-sm btn-ghost" onclick="Absence.undrop('${s.id}','${teacher.id}')">✔ عاد للدراسة</button>`
-            : ""}
-          <button class="btn btn-sm btn-ghost btn-icon" style="color:var(--danger)"
-                  title="إزالة من قائمة هذا الأستاذ نهائيًا"
-                  onclick="Absence.removeFromTeacher('${s.id}','${teacher.id}')">🗑 إزالة</button>
-        </td>
-      </tr>`;
-      }).join("")).join("")
-      : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا تلاميذ مطابقون</td></tr>`;
+    // ---- تبويبات مستويات الأستاذ المختار (تبقى فوق اللائحة) ----
+    let shown = records;
+    if (selTeacher) {
+      shown = byTeacher[selTeacher] || [];
+      const byLevel = {};
+      shown.forEach(r => {
+        const lv = DB.getStudent(r.studentId)?.level || "بدون مستوى";
+        (byLevel[lv] = byLevel[lv] || []).push(r);
+      });
+      const levels = Object.keys(byLevel).sort();
+      if (selLevel && !byLevel[selLevel]) selLevel = "";
+      $("absLevelWrap").hidden = false;
+      $("absLevelTabs").innerHTML = levels.map(lv => `
+        <button type="button" class="tab-btn ${selLevel === lv ? "active" : ""}" data-lv="${esc(lv)}">
+          📚 ${esc(lv)} <span class="tab-count">${byLevel[lv].length}</span>
+        </button>`).join("") || `<span class="hint">لا غيابات لهذا الأستاذ في هذه المدة</span>`;
+      $("absLevelTabs").querySelectorAll(".tab-btn").forEach(btn => {
+        btn.onclick = () => {
+          selLevel = (selLevel === btn.dataset.lv) ? "" : btn.dataset.lv;
+          renderStats();
+        };
+      });
+      if (selLevel) shown = byLevel[selLevel] || [];
+    } else {
+      $("absLevelWrap").hidden = true;
+      selLevel = "";
+    }
+
+    // ---- الجدول ----
+    const teacher = selTeacher ? DB.getTeacher(selTeacher) : null;
+
+    if (mode === "day") {
+      // عرض يومي: لائحة الغائبين في ذلك اليوم
+      $("absTableHead").innerHTML =
+        `<tr><th>التلميذ</th><th>القسم</th><th>المادة</th><th>الأستاذ</th><th>الحالة</th>${teacher ? "<th>إجراءات</th>" : ""}</tr>`;
+      $("absTable").querySelector("tbody").innerHTML = shown.length ? shown.map(r => {
+        const s = DB.getStudent(r.studentId);
+        if (!s) return "";
+        const t = DB.getTeacher(r.teacherId);
+        const droppedSince = s.dropped?.[r.subject];
+        return `<tr>
+          <td><a href="#" onclick="Students.view('${s.id}');return false"
+                 style="color:var(--teal-dark);font-weight:600">${esc(s.name)}</a>
+              <small style="color:var(--muted)">${esc(s.id)}</small></td>
+          <td>${esc(s.level || "—")}</td>
+          <td>${esc(r.subject)}</td>
+          <td>${t ? "ذ. " + esc(t.name) : "—"}</td>
+          <td>${droppedSince ? `<span class="badge late">⛔ منقطع</span>` : `<span class="badge ok">يواصل</span>`}</td>
+          ${teacher ? `<td style="white-space:nowrap">
+            ${droppedSince ? `<button class="btn btn-sm btn-ghost" onclick="Absence.undrop('${s.id}','${teacher.id}')">✔ عاد</button>` : ""}
+            <button class="btn btn-sm btn-ghost btn-icon" style="color:var(--danger)"
+                    onclick="Absence.removeFromTeacher('${s.id}','${teacher.id}')">🗑</button>
+          </td>` : ""}
+        </tr>`;
+      }).join("") : `<tr><td colspan="6" style="text-align:center;color:var(--muted)">لا غيابات مسجلة في ${esc(label)} ✔</td></tr>`;
+    } else {
+      // عرض شهري: مجمّع لكل تلميذ/مادة مع العدد والأيام
+      const grouped = {};
+      shown.forEach(r => {
+        const key = r.studentId + "|" + r.subject;
+        grouped[key] = grouped[key] || { r, dates: [] };
+        grouped[key].dates.push(r.date);
+      });
+      const rows = Object.values(grouped).sort((a, b) => b.dates.length - a.dates.length);
+      $("absTableHead").innerHTML =
+        `<tr><th>التلميذ</th><th>القسم</th><th>المادة</th><th>الأستاذ</th><th>عدد الغيابات</th><th>أيام الغياب</th><th>الحالة</th>${teacher ? "<th>إجراءات</th>" : ""}</tr>`;
+      $("absTable").querySelector("tbody").innerHTML = rows.length ? rows.map(({ r, dates }) => {
+        const s = DB.getStudent(r.studentId);
+        if (!s) return "";
+        const t = DB.getTeacher(r.teacherId);
+        const droppedSince = s.dropped?.[r.subject];
+        return `<tr>
+          <td><a href="#" onclick="Students.view('${s.id}');return false"
+                 style="color:var(--teal-dark);font-weight:600">${esc(s.name)}</a>
+              <small style="color:var(--muted)">${esc(s.id)}</small></td>
+          <td>${esc(s.level || "—")}</td>
+          <td>${esc(r.subject)}</td>
+          <td>${t ? "ذ. " + esc(t.name) : "—"}</td>
+          <td><b style="color:${dates.length >= 3 ? "var(--danger)" : "inherit"};font-size:16px">${dates.length}</b></td>
+          <td class="subjects-cell">${dates.sort().map(d => d.slice(8)).join("، ")}</td>
+          <td>${droppedSince ? `<span class="badge late">⛔ منقطع</span>` : `<span class="badge ok">يواصل</span>`}</td>
+          ${teacher ? `<td style="white-space:nowrap">
+            ${droppedSince ? `<button class="btn btn-sm btn-ghost" onclick="Absence.undrop('${s.id}','${teacher.id}')">✔ عاد</button>` : ""}
+            <button class="btn btn-sm btn-ghost btn-icon" style="color:var(--danger)"
+                    onclick="Absence.removeFromTeacher('${s.id}','${teacher.id}')">🗑</button>
+          </td>` : ""}
+        </tr>`;
+      }).join("") : `<tr><td colspan="8" style="text-align:center;color:var(--muted)">لا غيابات مسجلة في ${esc(label)} ✔</td></tr>`;
+    }
   }
 
   /** إزالة تلميذ من قائمة الأستاذ: يختفي فورًا من تطبيق الأستاذ */
@@ -3560,35 +3672,26 @@ const Absence = (() => {
     renderStats();
   }
 
-  function refreshLevelFilter() {
-    const cur = $("absLevelFilter").value;
-    const levels = [...new Set(DB.students.map(s => s.level || "بدون مستوى"))].sort();
-    $("absLevelFilter").innerHTML = `<option value="">كل المستويات</option>` +
-      levels.map(l => `<option ${cur === l ? "selected" : ""}>${esc(l)}</option>`).join("");
-  }
-
-  function refreshTeacherFilter() {
-    const cur = $("absTeacherFilter").value;
-    $("absTeacherFilter").innerHTML = `<option value="">— نظرة عامة (كل الأساتذة) —</option>` +
-      DB.teachers.map(t => `<option value="${t.id}" ${cur === t.id ? "selected" : ""}>ذ. ${esc(t.name)} — ${esc(t.subject)}</option>`).join("");
-  }
-
   /* =============== التهيئة =============== */
 
   function render() {
     $("attUrl").value = DB.settings.attendanceUrl || "";
     if (DB.settings.firebase && !$("fbConfig").value) $("fbConfig").value = DB.settings.firebase;
-    refreshTeacherFilter();
-    refreshLevelFilter();
     setStatus();
     renderStats();
   }
 
   function init() {
+    $("absDay").value = today();
     $("absMonth").value = thisMonth();
+    $("absMode").addEventListener("change", () => {
+      const day = $("absMode").value === "day";
+      $("wrapAbsDay").hidden = !day;
+      $("wrapAbsMonth").hidden = day;
+      renderStats();
+    });
+    $("absDay").addEventListener("change", renderStats);
     $("absMonth").addEventListener("change", renderStats);
-    $("absTeacherFilter").addEventListener("change", renderStats);
-    $("absLevelFilter").addEventListener("change", renderStats);
     $("btnFbConnect").addEventListener("click", saveAndConnect);
     $("btnCopyAttLink").addEventListener("click", copyLink);
     $("btnCopyPlatformLink").addEventListener("click", copyPlatformLink);
