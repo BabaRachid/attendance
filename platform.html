@@ -555,6 +555,35 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
 .tab-btn.tab-all{border-style:dashed}
 .tabs-label{font-size:12.5px;font-weight:700;color:var(--muted);margin:8px 0 0}
 
+/* =========================================================
+   طباعة لوائح التلاميذ (مفروزة حسب تاريخ التسجيل)
+   ========================================================= */
+.students-print{display:none}
+.sp-head{
+  display:flex;align-items:center;gap:14px;border-bottom:2.5px solid var(--teal);
+  padding-bottom:10px;margin-bottom:14px;
+}
+.sp-head img{height:52px}
+.sp-head h1{font-size:20px;margin:0}
+.sp-head .sp-meta{margin-inline-start:auto;text-align:left;font-size:11.5px;color:#4A5560}
+.sp-date{
+  font-family:var(--font-disp);font-weight:800;font-size:14px;color:var(--teal-dark);
+  background:#EEF5F4;border-inline-start:4px solid var(--teal);
+  padding:7px 12px;border-radius:6px;margin:16px 0 6px;
+  page-break-after:avoid;
+}
+.sp-table{width:100%;border-collapse:collapse;font-size:11.5px}
+.sp-table th{background:#F2F5F3;border:1px solid #C9D2CE;padding:5px 7px;text-align:right}
+.sp-table td{border:1px solid #D8DFDB;padding:4px 7px}
+.sp-table tr{page-break-inside:avoid}
+
+@media print{
+  body.print-students .receipt-print{display:none}
+  body.print-students .students-print{display:block!important}
+  body.print-students .students-print, body.print-students .students-print *{visibility:visible}
+  body.print-students .students-print{position:absolute;inset:0;background:#fff;padding:6mm}
+}
+
 </style>
 </head>
 <body>
@@ -680,6 +709,7 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
         <div class="head-actions">
           <button class="btn btn-primary btn-lg" data-goto="register">✚ تسجيل تلميذ جديد</button>
           <button class="btn btn-ghost" id="btnExportStudents">تصدير Excel</button>
+          <button class="btn btn-ghost" id="btnPrintStudents">🖨 تصدير PDF / طباعة</button>
         </div>
       </div>
 
@@ -693,6 +723,15 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
             <option value="paid">مؤدى بالكامل</option>
             <option value="partial">أداء جزئي (عليه باقي)</option>
             <option value="unpaid">غير مؤدى</option>
+          </select>
+          <label class="inline" title="عرض المسجلين في يوم محدد">يوم التسجيل
+            <input type="date" id="filterRegDate" class="input">
+            <button type="button" class="btn btn-sm btn-ghost" id="btnClearRegDate" title="إلغاء المرشح">✕</button>
+          </label>
+          <select id="studentsSort" class="input">
+            <option value="newest">الأحدث تسجيلًا أولًا</option>
+            <option value="oldest">الأقدم تسجيلًا أولًا</option>
+            <option value="name">حسب الاسم</option>
           </select>
         </div>
 
@@ -1230,6 +1269,9 @@ label.inline{display:flex;align-items:center;gap:8px;font-weight:600;font-size:1
     </div>
   </div>
 </div>
+
+<!-- منطقة طباعة لوائح التلاميذ -->
+<div id="studentsPrintArea" class="students-print" aria-hidden="true"></div>
 
 <!-- منطقة طباعة الوصل -->
 <div id="receiptPrint" class="receipt-print" aria-hidden="true"></div>
@@ -2656,13 +2698,22 @@ const Students = (() => {
       if (lvl && s.level !== lvl) return false;
       if (sch && s.school !== sch) return false;
       if (pay && DB.payStatus(s.id, ym).status !== pay) return false;
+      const regDate = $("filterRegDate").value;
+      if (regDate && (s.startDate || s.createdAt || "") !== regDate) return false;
       return true;
     });
   }
 
+  /** تاريخ تسجيل التلميذ (بداية التسجيل أو تاريخ الإنشاء) */
+  function regDateOf(s) { return s.startDate || s.createdAt || ""; }
+
   function renderTable() {
     const ym = thisMonth();
     const list = applyFilters();
+    const sort = $("studentsSort").value;
+    if (sort === "newest") list.sort((a, b) => regDateOf(b).localeCompare(regDateOf(a)) || a.name.localeCompare(b.name));
+    else if (sort === "oldest") list.sort((a, b) => regDateOf(a).localeCompare(regDateOf(b)) || a.name.localeCompare(b.name));
+    else list.sort((a, b) => a.name.localeCompare(b.name));
     const tbody = $("studentsTable").querySelector("tbody");
 
     $("studentsCount").textContent = `${list.length} تلميذ(ة) من أصل ${DB.students.length}`;
@@ -2713,6 +2764,65 @@ const Students = (() => {
     DB.deleteStudent(id);
     toast("تم حذف التلميذ");
     render();
+  }
+
+  /* =============== الطباعة / PDF =============== */
+
+  /** طباعة لوائح التلاميذ مفروزة حسب تاريخ التسجيل (الأحدث أولًا) */
+  function printStudents() {
+    const list = applyFilters();
+    if (!list.length) { toast("لا يوجد تلاميذ مطابقون للطباعة", "warn"); return; }
+
+    // تجميع حسب تاريخ التسجيل
+    const groups = {};
+    list.forEach(s => {
+      const d = regDateOf(s) || "بدون تاريخ";
+      (groups[d] = groups[d] || []).push(s);
+    });
+    const dates = Object.keys(groups).sort().reverse();   // الأحدث أولًا
+
+    const st = DB.settings;
+    let html = `
+      <div class="sp-head">
+        ${st.logo ? `<img src="${st.logo}" alt="">` : ""}
+        <div>
+          <h1>${esc(st.centerName)}</h1>
+          <div style="font-size:12px;color:#4A5560">لوائح التلاميذ حسب تاريخ التسجيل</div>
+        </div>
+        <div class="sp-meta">
+          تاريخ الطباعة: ${esc(fmtDate(today()))}<br>
+          عدد التلاميذ: ${list.length}
+        </div>
+      </div>`;
+
+    dates.forEach(d => {
+      const rows = groups[d].sort((a, b) => a.name.localeCompare(b.name));
+      html += `
+      <div class="sp-date">📅 ${d === "بدون تاريخ" ? d : "مسجلون يوم " + esc(fmtDate(d))}
+        — ${rows.length} تلميذ(ة)</div>
+      <table class="sp-table">
+        <thead><tr>
+          <th>الرقم</th><th>الاسم الكامل</th><th>المستوى</th><th>الشعبة</th>
+          <th>هاتف ولي الأمر</th><th>المبلغ الشهري</th><th>المواد</th>
+        </tr></thead>
+        <tbody>${rows.map(s => `
+          <tr>
+            <td>${esc(s.id)}</td>
+            <td>${esc(s.name)}</td>
+            <td>${esc(s.level || "—")}</td>
+            <td>${esc(s.branch || "—")}</td>
+            <td dir="ltr">${esc(s.fatherPhone || s.motherPhone || "—")}</td>
+            <td>${esc(String(s.amount || 0))} درهم</td>
+            <td>${esc((s.subjects || []).join("، "))}</td>
+          </tr>`).join("")}
+        </tbody>
+      </table>`;
+    });
+
+    $("studentsPrintArea").innerHTML = html;
+    document.body.classList.add("print-students");
+    window.print();
+    setTimeout(() => document.body.classList.remove("print-students"), 500);
   }
 
   /* =============== بطاقة العرض =============== */
@@ -2782,8 +2892,10 @@ const Students = (() => {
 
     const rerender = debounce(renderTable, 150);
     $("studentSearch").addEventListener("input", rerender);
-    ["filterLevel", "filterSchool", "filterPayStatus"].forEach(id =>
+    ["filterLevel", "filterSchool", "filterPayStatus", "filterRegDate", "studentsSort"].forEach(id =>
       $(id).addEventListener("change", renderTable));
+    $("btnClearRegDate").addEventListener("click", () => { $("filterRegDate").value = ""; renderTable(); });
+    $("btnPrintStudents").addEventListener("click", printStudents);
 
     $("btnExportStudents").addEventListener("click", () => {
       DB.downloadAllWorkbooks();
